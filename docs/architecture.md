@@ -14,7 +14,9 @@ Disk access, seeking and decoding belong on a producer thread. CPAL consumes a b
 
 Rate adjustment changes pitch and duration together. The first preview renderer uses linear interpolation, not mastering-quality antialiased resampling or pitch-preserving time stretching. These are explicit follow-up DSP tasks, not silently interchangeable features. Mono is duplicated; stereo is preserved; >2-channel sources are rejected until a documented channel-layout/downmix policy exists. Extra output channels are silent.
 
-Seek/switch invalidates buffered playback immediately. Gain/pause are callback-side atomics. Status position is the last rendered source frame, not the decoder's ahead-of-playback position; it excludes hardware latency. An underrun counter counts callback shortages while decoding is active, not natural EOF.
+Seek/switch invalidates buffered playback when the worker applies the queued command. Gain/pause are callback-side atomics; selecting a file preserves the pause flag. Consecutive queued seeks/plays are coalesced, but an in-flight filesystem read cannot be cancelled. Status position is the last rendered source frame (or the pending seek target), not the decoder's ahead-of-playback position; it excludes hardware latency. `rendered_generation` distinguishes applied commands from audio actually reaching the callback. An underrun counter counts callback shortages while decoding is active, including seek/switch transition gaps, but not natural EOF.
+
+Request a 256-frame output buffer clamped to the device's advertised range; use the host default only when the range is unknown. This changed local median command-to-rendered latency from ~43 ms to ~8 ms. The 8192-frame ring is read-ahead, not mandatory added latency: each seek changes its generation and discards stale frames.
 
 ## Caching and responsiveness
 

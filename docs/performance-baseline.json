@@ -1,0 +1,95 @@
+{
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+  "cpu": "x86_64",
+  "note": "Local warm filesystem; cold/warm refer to waveform analysis cache, not OS page cache.",
+  "decode": {
+    "60s_wav": {
+      "elapsed_seconds": 0.048225951,
+      "first_frame_ms": 0.08514899999999999,
+      "frames": 2880000,
+      "open_ms": 0.084528,
+      "realtime_factor": 1244.1434280891629,
+      "sum_squares": 6861.146955192089
+    },
+    "600s_wav": {
+      "elapsed_seconds": 0.445546013,
+      "first_frame_ms": 0.081262,
+      "frames": 28800000,
+      "open_ms": 0.081032,
+      "realtime_factor": 1346.6622582031723,
+      "sum_squares": 68611.46955192089
+    },
+    "60s_mp3": {
+      "elapsed_seconds": 0.066945629,
+      "first_frame_ms": 0.247352,
+      "frames": 2880000,
+      "open_ms": 0.246922,
+      "realtime_factor": 896.2497013808025,
+      "sum_squares": 6824.651413459216
+    }
+  },
+  "mp3_metadata": {
+    "sample_rate": 48000,
+    "channels": 2,
+    "frames": 2880000,
+    "duration_seconds": 60.0,
+    "bits_per_sample": null,
+    "tags": [
+      [
+        "TSSE",
+        "Lavf60.16.100"
+      ]
+    ]
+  },
+  "waveform_cold": {
+    "ms": 389.6392240021669,
+    "cache_hit": false,
+    "bins": 3516
+  },
+  "waveform_warm": {
+    "ms": 7.142914000723977,
+    "cache_hit": true,
+    "bins": 3516
+  },
+  "list_10000": {
+    "ms": 17.01924900044105,
+    "entries": 10000
+  },
+  "peak_rss_kib": {
+    "60s.wav": 4464,
+    "600s.wav": 4596
+  },
+  "audio": {
+    "switch_ms": [
+      4.481108000618406,
+      7.7034319983795285,
+      10.95423999868217,
+      7.730693003395572,
+      5.519509002624545
+    ],
+    "seek_ms": [
+      2.251879999676021,
+      5.615378999209497,
+      5.6077340013871435,
+      7.954352000524523,
+      7.851750000554603
+    ],
+    "steady_1s_underruns": 0,
+    "final_status": {
+      "state": "playing",
+      "path": "<temporary fixture>/60s.wav",
+      "position_seconds": 2.197324263039619,
+      "gain": 0.0,
+      "rate": 2.0,
+      "peak": 0.0,
+      "underrun_callbacks": 8,
+      "clipped_samples": 0,
+      "generation": 18,
+      "rendered_generation": 18,
+      "error": null
+    },
+    "note": "Muted CPAL stream; command-to-first-rendered-generation, includes polling, excludes DAC latency.",
+    "switch_ms_median": 7.7034319983795285,
+    "seek_ms_median": 5.615378999209497
+  }
+}
