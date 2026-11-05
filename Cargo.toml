@@ -1,11 +1,12 @@
 [workspace]
-members = ["crates/frx-core", "crates/frx-audio", "crates/frx-cli"]
+members = ["crates/frx-core", "crates/frx-audio", "crates/frx-cli", "crates/frx-gui"]
+default-members = ["crates/frx-cli"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 publish = false
 
 [workspace.dependencies]
