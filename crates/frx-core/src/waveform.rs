@@ -84,6 +84,19 @@ pub fn analyze(path: &Path, max_bins: usize) -> Result<Waveform> {
     Ok(result)
 }
 
+fn read_cached(path: &Path, bins: usize) -> Option<Waveform> {
+    use std::io::Read;
+    let file = fs::File::open(path).ok()?;
+    // Bound the actual read too, even if another process grows the file after stat.
+    let mut bytes = Vec::new();
+    file.take(8 * 1024 * 1024).read_to_end(&mut bytes).ok()?;
+    let waveform: Waveform = serde_json::from_slice(&bytes).ok()?;
+    if waveform.peaks.len() > bins || waveform.sample_rate == 0 || waveform.frames_per_bin == 0 {
+        return None;
+    }
+    Some(waveform)
+}
+
 pub struct WaveformCache {
     directory: PathBuf,
     budget: u64,
@@ -112,24 +125,12 @@ impl WaveformCache {
 
     pub fn get(&self, path: &Path, bins: usize) -> Result<CachedWaveform> {
         let key = Self::key(path, bins)?;
-        let file = self.directory.join(format!("{key}.json"));
-        if let Ok(meta) = file.metadata() {
-            // Never allocate unbounded memory from a malformed cache entry.
-            if meta.len() < 8 * 1024 * 1024 {
-                if let Ok(bytes) = fs::read(&file) {
-                    if let Ok(waveform) = serde_json::from_slice::<Waveform>(&bytes) {
-                        if waveform.peaks.len() <= bins
-                            && waveform.sample_rate > 0
-                            && waveform.frames_per_bin > 0
-                        {
-                            return Ok(CachedWaveform {
-                                cache_hit: true,
-                                waveform,
-                            });
-                        }
-                    }
-                }
-            }
+        let file = self.directory.join(format!("frx-waveform-{key}.json"));
+        if let Some(waveform) = read_cached(&file, bins) {
+            return Ok(CachedWaveform {
+                cache_hit: true,
+                waveform,
+            });
         }
         let waveform = analyze(path, bins)?;
         if Self::key(path, bins)? != key {
@@ -148,7 +149,13 @@ impl WaveformCache {
         let mut total = 0;
         for entry in fs::read_dir(&self.directory)? {
             let entry = entry?;
-            if entry.path().extension().is_some_and(|e| e == "json") {
+            let name = entry.file_name();
+            let owned = name
+                .to_str()
+                .and_then(|s| s.strip_prefix("frx-waveform-"))
+                .and_then(|s| s.strip_suffix(".json"))
+                .is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()));
+            if owned && entry.file_type()?.is_file() {
                 let meta = entry.metadata()?;
                 total += meta.len();
                 entries.push((meta.modified()?, meta.len(), entry.path()));
@@ -203,9 +210,10 @@ mod tests {
         assert!(cache.get(&path, 8)?.cache_hit);
         fixture(&path, 2000)?;
         assert!(!cache.get(&path, 8)?.cache_hit);
-        let entry = cache
-            .directory
-            .join(format!("{}.json", WaveformCache::key(&path, 8)?));
+        let entry = cache.directory.join(format!(
+            "frx-waveform-{}.json",
+            WaveformCache::key(&path, 8)?
+        ));
         fs::write(entry, b"broken")?;
         assert!(!cache.get(&path, 8)?.cache_hit);
         assert!(cache.get(&path, 3).is_err());
@@ -220,8 +228,12 @@ mod tests {
             directory: dir.path().join("cache"),
             budget: 1,
         };
+        fs::create_dir_all(&cache.directory)?;
+        let unrelated = cache.directory.join("important.json");
+        fs::write(&unrelated, b"user-owned data")?;
         cache.get(&path, 8)?;
-        assert_eq!(fs::read_dir(cache.directory)?.count(), 0);
+        assert_eq!(fs::read(&unrelated)?, b"user-owned data");
+        assert_eq!(fs::read_dir(cache.directory)?.count(), 1);
         Ok(())
     }
     #[test]

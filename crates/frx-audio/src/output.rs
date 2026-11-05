@@ -32,8 +32,10 @@ fn build<T: SizedSample + FromSample<f32>>(
 ) -> Result<cpal::Stream> {
     let channels = config.channels() as usize;
     let error_shared = shared.clone();
+    let mut stream_config = config.config();
+    stream_config.buffer_size = preferred_buffer_size(config.buffer_size());
     Ok(device.build_output_stream(
-        &config.config(),
+        &stream_config,
         move |data: &mut [T], _| {
             fill(data, channels, &mut consumer, &shared);
         },
@@ -42,6 +44,15 @@ fn build<T: SizedSample + FromSample<f32>>(
         },
         None,
     )?)
+}
+
+fn preferred_buffer_size(supported: &cpal::SupportedBufferSize) -> cpal::BufferSize {
+    match *supported {
+        cpal::SupportedBufferSize::Range { min, max } => {
+            cpal::BufferSize::Fixed(256u32.clamp(min, max))
+        }
+        cpal::SupportedBufferSize::Unknown => cpal::BufferSize::Default,
+    }
 }
 
 /// Callback kernel: bounded ring consumption, arithmetic, and atomics only.
@@ -115,6 +126,29 @@ fn fill<T: SizedSample + FromSample<f32>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn buffer_request_is_small_but_respects_device_limits() {
+        use cpal::{BufferSize, SupportedBufferSize};
+        assert!(matches!(
+            preferred_buffer_size(&SupportedBufferSize::Range { min: 32, max: 8192 }),
+            BufferSize::Fixed(256)
+        ));
+        assert!(matches!(
+            preferred_buffer_size(&SupportedBufferSize::Range {
+                min: 512,
+                max: 8192
+            }),
+            BufferSize::Fixed(512)
+        ));
+        assert!(matches!(
+            preferred_buffer_size(&SupportedBufferSize::Range { min: 32, max: 128 }),
+            BufferSize::Fixed(128)
+        ));
+        assert!(matches!(
+            preferred_buffer_size(&SupportedBufferSize::Unknown),
+            BufferSize::Default
+        ));
+    }
     #[test]
     fn stale_frames_silence_pause_gain_and_clipping() {
         let shared = Shared::default();

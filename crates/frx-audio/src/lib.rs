@@ -322,9 +322,9 @@ fn worker(
     sample_rate: u32,
 ) {
     let mut renderer = None;
+    let mut pending = Vec::with_capacity(COMMAND_CAPACITY);
     while !shared.shutdown.load(Ordering::Acquire) {
         // Coalesce a consecutive burst of seeks or plays; preserve other ordering.
-        let mut pending = Vec::with_capacity(COMMAND_CAPACITY);
         for _ in 0..COMMAND_CAPACITY {
             match receiver.try_recv() {
                 Ok(command) => {
@@ -341,7 +341,7 @@ fn worker(
                 Err(TryRecvError::Disconnected) => return,
             }
         }
-        for command in pending {
+        for command in pending.drain(..) {
             if let Err(error) = apply(command, &mut renderer, &shared, sample_rate) {
                 fail(&shared, &mut renderer, error);
             }

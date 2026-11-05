@@ -106,19 +106,26 @@ fn worker_handles_rapid_seeks_and_shutdown_with_full_ring() -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut observed = false;
     while Instant::now() < deadline {
-        if let Ok(frame) = consumer.pop() {
-            if frame.position >= 1.0
-                && frame.position < 1.1
-                && frame.generation == shared.generation.load(Ordering::Acquire)
-            {
-                observed = true;
-                break;
-            }
+        if let Ok(frame) = consumer.pop()
+            && frame.position >= 1.0
+            && frame.position < 1.1
+            && frame.generation == shared.generation.load(Ordering::Acquire)
+        {
+            observed = true;
+            break;
         }
         thread::sleep(Duration::from_millis(1));
     }
+    while consumer.slots() < 64 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    let full = consumer.slots() == 64;
     shared.shutdown.store(true, Ordering::Release);
     handle.join().unwrap();
+    assert!(
+        full,
+        "shutdown must also work when the producer is backpressured"
+    );
     assert!(
         observed,
         "worker must reach the final seek without an output device"

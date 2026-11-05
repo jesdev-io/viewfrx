@@ -46,7 +46,10 @@ impl AudioReader {
         let probed = symphonia::default::get_probe().format(
             &hint,
             MediaSourceStream::new(Box::new(file), Default::default()),
-            &FormatOptions::default(),
+            &FormatOptions {
+                enable_gapless: true,
+                ..Default::default()
+            },
             &MetadataOptions::default(),
         )?;
         let mut format = probed.format;
@@ -100,15 +103,15 @@ impl AudioReader {
                 })
                 .collect();
         }
-        if let Some(mut metadata) = probed.metadata.into_inner() {
-            if let Some(revision) = metadata.metadata().current() {
-                reader.info.tags.extend(
-                    revision
-                        .tags()
-                        .iter()
-                        .map(|tag| (tag.key.clone(), tag.value.to_string())),
-                );
-            }
+        if let Some(mut metadata) = probed.metadata.into_inner()
+            && let Some(revision) = metadata.metadata().current()
+        {
+            reader.info.tags.extend(
+                revision
+                    .tags()
+                    .iter()
+                    .map(|tag| (tag.key.clone(), tag.value.to_string())),
+            );
         }
         Ok(reader)
     }
