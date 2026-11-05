@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use frx_audio::{Command, Engine};
 use frx_core::{
-    catalog::{Catalog, discover},
+    catalog::{Catalog, discover_ordered},
     decode::inspect,
     waveform::WaveformCache,
 };
@@ -40,6 +40,9 @@ enum Action {
         path: Option<PathBuf>,
         #[arg(short, long)]
         recursive: bool,
+        /// Alphabetical order within each directory (may delay first result).
+        #[arg(long)]
+        sort: bool,
     },
     /// Probe technical metadata and embedded tags without decoding the entire file.
     Inspect { path: PathBuf },
@@ -105,7 +108,11 @@ fn run() -> Result<()> {
             catalog.save(&args.library)?;
             emit(&catalog)?;
         }
-        Action::List { path, recursive } => {
+        Action::List {
+            path,
+            recursive,
+            sort,
+        } => {
             let roots = if let Some(path) = path {
                 vec![path]
             } else {
@@ -113,7 +120,7 @@ fn run() -> Result<()> {
             };
             let mut errors = 0;
             for root in roots {
-                let result = discover(&root, recursive, |entry| match entry {
+                let result = discover_ordered(&root, recursive, sort, |entry| match entry {
                     Ok(path) => emit(&json!({"path":path})),
                     Err(error) => {
                         errors += 1;

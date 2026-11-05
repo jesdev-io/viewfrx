@@ -34,7 +34,7 @@ pub enum Command {
     Stop,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Status {
     pub state: &'static str,
     pub path: Option<PathBuf>,
@@ -107,7 +107,7 @@ struct Frame {
     generation: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DeviceInfo {
     pub index: usize,
     pub name: String,

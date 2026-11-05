@@ -23,6 +23,17 @@ pub fn is_audio_path(path: &Path) -> bool {
 pub fn discover(
     root: &Path,
     recursive: bool,
+    emit: impl FnMut(Result<PathBuf>) -> Result<()>,
+) -> Result<()> {
+    discover_ordered(root, recursive, false, emit)
+}
+
+/// Optional per-directory alphabetical order. Sorting happens before emitting
+/// that directory, so call off the UI thread for large/slow folders.
+pub fn discover_ordered(
+    root: &Path,
+    recursive: bool,
+    sorted: bool,
     mut emit: impl FnMut(Result<PathBuf>) -> Result<()>,
 ) -> Result<()> {
     if !root.exists() {
@@ -35,7 +46,13 @@ pub fn discover(
         return emit(Ok(root.to_path_buf()));
     }
     let depth = if recursive { usize::MAX } else { 1 };
-    for entry in WalkDir::new(root).max_depth(depth).follow_links(false) {
+    let walker = WalkDir::new(root).max_depth(depth).follow_links(false);
+    let walker = if sorted {
+        walker.sort_by_file_name()
+    } else {
+        walker
+    };
+    for entry in walker {
         match entry {
             Ok(entry) if entry.file_type().is_file() && is_audio_path(entry.path()) => {
                 emit(Ok(entry.into_path()))?

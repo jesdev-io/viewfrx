@@ -34,6 +34,18 @@ pub struct CachedWaveform {
 /// Bounded-memory overview: merge adjacent bins as the file grows. No duration
 /// estimate needed; the final bin may contain fewer than frames_per_bin frames.
 pub fn analyze(path: &Path, max_bins: usize) -> Result<Waveform> {
+    analyze_cancellable(path, max_bins, || false)
+}
+
+/// Cooperative cancellation between decoder frames; cannot interrupt OS reads.
+pub fn analyze_cancellable(
+    path: &Path,
+    max_bins: usize,
+    cancelled: impl Fn() -> bool,
+) -> Result<Waveform> {
+    if cancelled() {
+        bail!("analysis cancelled");
+    }
     if !(2..=65536).contains(&max_bins) || !max_bins.is_power_of_two() {
         bail!("bins must be a power of two between 2 and 65536");
     }
@@ -51,6 +63,9 @@ pub fn analyze(path: &Path, max_bins: usize) -> Result<Waveform> {
     };
     let mut count = 0;
     while reader.next_frame(&mut frame)? {
+        if result.frames.is_multiple_of(4096) && cancelled() {
+            bail!("analysis cancelled");
+        }
         for &sample in &frame {
             current.min = current.min.min(sample);
             current.max = current.max.max(sample);
@@ -124,6 +139,18 @@ impl WaveformCache {
     }
 
     pub fn get(&self, path: &Path, bins: usize) -> Result<CachedWaveform> {
+        self.get_cancellable(path, bins, || false)
+    }
+
+    pub fn get_cancellable(
+        &self,
+        path: &Path,
+        bins: usize,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<CachedWaveform> {
+        if cancelled() {
+            bail!("analysis cancelled");
+        }
         let key = Self::key(path, bins)?;
         let file = self.directory.join(format!("frx-waveform-{key}.json"));
         if let Some(waveform) = read_cached(&file, bins) {
@@ -132,7 +159,10 @@ impl WaveformCache {
                 waveform,
             });
         }
-        let waveform = analyze(path, bins)?;
+        let waveform = analyze_cancellable(path, bins, &cancelled)?;
+        if cancelled() {
+            bail!("analysis cancelled");
+        }
         if Self::key(path, bins)? != key {
             bail!("file changed during analysis; retry");
         }
@@ -219,6 +249,23 @@ mod tests {
         assert!(cache.get(&path, 3).is_err());
         Ok(())
     }
+    #[test]
+    fn cancellation_stops_analysis_without_writing_cache() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("a.wav");
+        fixture(&path, 32000)?;
+        let calls = std::cell::Cell::new(0);
+        let cache = WaveformCache::new(dir.path().join("cache"));
+        let result = cache.get_cancellable(&path, 8, || {
+            calls.set(calls.get() + 1);
+            calls.get() >= 4
+        });
+        assert!(result.err().unwrap().to_string().contains("cancelled"));
+        assert!(!cache.directory.exists());
+        assert_eq!(calls.get(), 4);
+        Ok(())
+    }
+
     #[test]
     fn cache_budget_is_enforced() -> Result<()> {
         let dir = tempfile::tempdir()?;
