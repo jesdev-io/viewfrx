@@ -1,12 +1,13 @@
-# Architecture and first milestone
+# Architecture
 
 ## Boundaries
 
 - `frx-core`: filesystem discovery, streaming decoding/probing, cached waveform analysis. No device, UI, or argument-parsing dependencies.
 - `frx-audio`: typed transport commands, streaming preview engine, CPAL device adapter. No CLI or UI dependencies.
-- `frx-cli`: Clap and JSON-lines adapters. A future GUI uses the same Rust API, never subprocess playback.
+- `frx-cli`: Clap and JSON-lines adapters.
+- `frx-gui`: egui views and background adapters over the same Rust APIs, never subprocess playback.
 
-We deliberately start with three crates, not a generic plugin/command framework.
+Four focused crates, not a generic plugin/command framework.
 
 ## Audio contract
 
@@ -20,10 +21,18 @@ Request a 256-frame output buffer clamped to the device's advertised range; use 
 
 ## Caching and responsiveness
 
-Waveform analysis is streaming, produces a bounded overview, and caches by canonical path, size, modification time and analysis version. It never stores decoded tracks in memory. The disk cache has a size budget and evicts oldest entries. Metadata/mtime is not a cryptographic content identity: same-size edits with deliberately preserved timestamps need cache deletion. Analysis and directory discovery are explicit CLI jobs, independent of the playback worker; the future GUI must schedule them off its event thread.
+Waveform analysis is streaming, produces a bounded overview, and caches by canonical path, size, modification time and analysis version. It never stores decoded tracks in memory. The disk cache has a size budget and evicts oldest entries. Metadata/mtime is not a cryptographic content identity: same-size edits with deliberately preserved timestamps need cache deletion. Analysis and directory discovery are explicit CLI jobs, independent of the playback worker. The GUI uses separate scan and analysis workers, bounded result queues, generation tokens and cooperative waveform cancellation. Cancellation is checked every 4096 source frames; it cannot interrupt OS I/O. Both non-cancellable CLI and cancellable GUI entry points share the same implementation.
 
-The audio ring provides bounded read-ahead for the current file. Speculative next-file preloading, progressive multiresolution waveforms, background library indexing, and cancellable analysis are follow-ups. Do not call the initial CLI foundation a finished performance implementation.
+The audio ring provides bounded read-ahead for the current file. Speculative next-file preloading, progressive multiresolution waveforms and a persistent searchable metadata index are follow-ups. Do not call the initial CLI foundation a finished performance implementation.
+
+## GUI responsiveness
+
+CPAL stream ownership stays on an audio-service thread (including open, reconfigure and drop), avoiding platform-specific `Stream: Send` assumptions. Views submit typed `frx_audio::Command` values over a bounded queue and read latest snapshots with `try_lock`. Engine status mutexes never reach the GUI or realtime callback.
+
+Scan results arrive in 128-entry batches through an eight-slot queue; at most eight batches are processed per UI update. The display caps at 100,000 candidates and virtualizes rows. Filtering is incremental for incoming batches, and recomputed in memory on query edits. Workers deduplicate imported roots' results and apply alphabetical per-directory traversal. Selection has its own generation and analysis worker, so it does not wait behind a whole-library scan. Old metadata/waveforms cannot overwrite newer selections. The UI performs no scanning, source-file I/O, decoding or device opening.
+
+Closing the GUI signals worker cancellation without joining potentially blocked OS reads on the event thread. Catalog/analysis writes use the existing atomic-write path; don't rely on an import being persisted if the process exits before that job completes. See [GUI notes](gui.md) for test boundaries and remaining work.
 
 ## Platform and licensing policy
 
-Linux is tested locally. CPAL supports Windows/macOS, but builds and device behavior must be verified on those systems. No remote or hosted CI is configured yet. Cargo.lock pins the actual dependency graph. Primary dependencies: Symphonia MPL-2.0; CPAL Apache-2.0; rtrb MIT/Apache-2.0; Clap MIT/Apache-2.0; Serde MIT/Apache-2.0. Keep library notices for distribution and review the complete transitive graph before release. No application license is selected on the owner's behalf.
+Linux is tested locally. CPAL supports Windows/macOS, but builds and device behavior must be verified on those systems. No remote or hosted CI is configured yet. Cargo.lock pins the actual dependency graph. Primary dependencies: Symphonia MPL-2.0; CPAL Apache-2.0; rtrb MIT/Apache-2.0; Clap MIT/Apache-2.0; Serde MIT/Apache-2.0; egui/eframe MIT/Apache-2.0; rfd MIT; image MIT/Apache-2.0. Keep library notices for distribution and review the complete transitive graph before release. No application license is selected on the owner's behalf.
