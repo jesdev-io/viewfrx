@@ -1,0 +1,17 @@
+{
+  "source_seconds": 600,
+  "source_bytes": 115200044,
+  "ui": {
+    "analyzing": false,
+    "frames": 297,
+    "library_candidates": 1,
+    "max_update_cpu_ms": 1.307654,
+    "scanning": false,
+    "spectrogram_feature": true,
+    "spectrogram_ready": true,
+    "visible_count": 1,
+    "waveform_bins": 3516
+  },
+  "total_seconds_including_5s_hold": 5.129,
+  "note": "Native GUI with an uncached 10-minute stereo WAV, muted and no playback. Measures update CPU, not GPU/display latency. Filesystem pages warm after fixture creation."
+}

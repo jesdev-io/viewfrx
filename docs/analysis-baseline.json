@@ -1,0 +1,125 @@
+{
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+  "cpu": "x86_64",
+  "note": "Local warm filesystem; cold/warm refer to waveform analysis cache, not OS page cache.",
+  "decode": {
+    "60s_wav": {
+      "elapsed_seconds": 0.037021015,
+      "first_frame_ms": 0.12204799999999999,
+      "frames": 2880000,
+      "open_ms": 0.121487,
+      "realtime_factor": 1620.7011071954673,
+      "sum_squares": 6861.146955192089
+    },
+    "600s_wav": {
+      "elapsed_seconds": 0.384598293,
+      "first_frame_ms": 0.067316,
+      "frames": 28800000,
+      "open_ms": 0.067026,
+      "realtime_factor": 1560.0693266727526,
+      "sum_squares": 68611.46955192089
+    },
+    "60s_mp3": {
+      "elapsed_seconds": 0.065477823,
+      "first_frame_ms": 0.364543,
+      "frames": 2880000,
+      "open_ms": 0.36413199999999996,
+      "realtime_factor": 916.3407891554366,
+      "sum_squares": 6824.651413459216
+    }
+  },
+  "mp3_metadata": {
+    "sample_rate": 48000,
+    "channels": 2,
+    "frames": 2880000,
+    "duration_seconds": 60.0,
+    "bits_per_sample": null,
+    "tags": [
+      [
+        "TSSE",
+        "Lavf60.16.100"
+      ]
+    ]
+  },
+  "waveform_cold": {
+    "ms": 329.1936329987948,
+    "cache_hit": false,
+    "bins": 3516
+  },
+  "waveform_warm": {
+    "ms": 5.201289000979159,
+    "cache_hit": true,
+    "bins": 3516
+  },
+  "spectrogram_cold": {
+    "ms": 1256.944073997147,
+    "cache_hit": false,
+    "columns": 440,
+    "frequency_bins": 256
+  },
+  "spectrogram_warm": {
+    "ms": 25.520849994791206,
+    "cache_hit": true,
+    "columns": 440,
+    "frequency_bins": 256
+  },
+  "list_10000": {
+    "ms": 12.206397004774772,
+    "entries": 10000
+  },
+  "peak_rss_kib": {
+    "60s.wav": 4908,
+    "600s.wav": 5200
+  },
+  "normalization": {
+    "source_peak": 0.048828125,
+    "source_peak_dbfs": -26.226599,
+    "target_dbfs": -1.0,
+    "gain": 18.25282,
+    "gain_db": 25.226597
+  },
+  "audio": {
+    "switch_ms": [
+      5.638317998091225,
+      7.752928999252617,
+      5.855273993802257,
+      7.828829999198206,
+      9.888135995424818
+    ],
+    "seek_ms": [
+      3.3695099991746247,
+      10.149345005629584,
+      2.273295998747926,
+      5.549101006181445,
+      5.754455996793695
+    ],
+    "steady_1s_underruns": 0,
+    "final_status": {
+      "state": "playing",
+      "path": "<temporary fixture>/60s.wav",
+      "position_seconds": 2.197324263039619,
+      "gain": 0.0,
+      "gain_db": null,
+      "normalization_gain": 1.0,
+      "normalization_enabled": false,
+      "rms_dbfs": [
+        null,
+        null
+      ],
+      "peak_dbfs": [
+        null,
+        null
+      ],
+      "rate": 2.0,
+      "peak": 0.0,
+      "underrun_callbacks": 9,
+      "clipped_samples": 0,
+      "generation": 19,
+      "rendered_generation": 19,
+      "error": null
+    },
+    "note": "Muted CPAL stream; command-to-first-rendered-generation, includes polling, excludes DAC latency.",
+    "switch_ms_median": 7.752928999252617,
+    "seek_ms_median": 5.549101006181445
+  }
+}

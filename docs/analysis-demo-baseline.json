@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "candidate_files": 10000,
+  "rendered_size": [
+    1280,
+    800
+  ],
+  "ui": {
+    "analyzing": false,
+    "frames": 179,
+    "library_candidates": 10000,
+    "max_update_cpu_ms": 0.8917569999999999,
+    "scanning": false,
+    "spectrogram_feature": true,
+    "spectrogram_ready": true,
+    "visible_count": 10000,
+    "waveform_bins": 2250
+  },
+  "total_seconds_including_3s_hold": 3.22,
+  "screenshot": "/home/tschavoll/repos/frxview/docs/assets/analysis.png",
+  "stderr_lines": 14,
+  "note": "Native rendering/import/analysis smoke only. Keyboard and waveform-click routing are tested separately without audio hardware."
+}

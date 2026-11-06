@@ -1,8 +1,8 @@
-# Native desktop milestone
+# Native desktop GUI
 
-![Native frxview GUI with 10,000 candidate files and a synthetic MP3 waveform](assets/gui.png)
+![Native frxview with a real synthetic chirp spectrogram and normalized waveform overlay](assets/analysis.png)
 
-Actual Linux framebuffer capture from the muted smoke test, not a mockup.
+Actual Linux framebuffer capture from the muted `--demo` smoke test, not a mockup. Both plots are calculated from a generated stereo WAV; placeholder list entries are not decoded recordings. The [initial waveform-only screenshot](assets/gui.png) is retained for historical comparison.
 
 ## Choice and scope
 
@@ -18,7 +18,7 @@ The bundled logo is copied unchanged from the requested sibling repository. Its 
 ## Run
 
 ```sh
-cargo run --release -p frx-gui -- /path/to/recordings
+cargo run --release -p frx-gui --features spectrogram -- /path/to/recordings
 # Separate catalog, if desired:
 ./target/release/frxview-gui --library /tmp/frx-library.json --cache /tmp/frx-cache /path/to/audio
 # Silent initial gain (can still be changed in the UI):
@@ -29,14 +29,16 @@ Imports register source paths in place. Initial discovery selects the first file
 
 GUI defaults to recursive traversal, alphabetical order within each directory and result deduplication; CLI defaults remain unchanged. `frxview list --sort --recursive` exposes the ordered traversal headlessly. Filtering searches filenames and full paths. Keyboard selection scrolls into view. The list displays at most 100,000 candidates; it reports the limit rather than silently claiming a complete listing.
 
-Settings cover output selection/retry, gain 0–2×, playback rate 0.25–4×, and a callback peak in dBFS. CLI gain still supports 0–4×. Device changes stop the current stream; press Play after the replacement is ready. Buffer/rate configuration and stable persistent device IDs are still pending. The meter is explicitly **not** a calibrated VU meter. Rate adjustment explicitly changes pitch and uses the existing preview interpolation.
+Settings cover output selection/retry, gain −60 to +12 dB plus mute, linked-channel −1 dBFS peak normalization, rate 0.25–4×, and vertical stereo RMS/peak dBFS meters. The `spectrogram` feature adds a source spectrogram with FFT-size and display-floor controls. Double-click sliders/value labels, toggles or selectors to reset; double-click either plot to rewind. Gain reset restores unity and unmutes. CLI linear gain still supports 0–4×.
+
+The subdued waveform shows exactly the auto gain used by Normalize. Uncached normalized audition waits for background peak analysis without freezing the UI; Cancel/Stop cancels that intent, and pending seeks are preserved. Device changes stop the current stream and cancel pending playback. Press Play after the replacement is ready. Buffer/rate configuration and stable persistent device IDs remain pending. The RMS/peak meter is VU-style, **not** an IEC-calibrated VU instrument. Rate changes pitch and uses preview interpolation. See [analysis conventions](analysis.md).
 
 ## Worker boundaries
 
 - **Audio service:** owns CPAL/Engine on its own thread; typed commands in, latest status out. Device discovery/open/drop never runs in egui `update()`.
 - **Library worker:** loads/saves the shared catalog, performs sorted traversal, deduplicates and emits bounded batches. New scans supersede old ones; queued imports remain additive.
-- **Analysis worker:** probes the selected file first, then generates/loads its waveform. Every response carries a selection generation. Cancelled work cannot replace a newer file's UI state or persist a partly generated waveform.
-- **Views:** model/filter/navigation, virtualized list rendering and bounded waveform painting. No source decoding or filesystem traversal in widgets.
+- **Analysis worker:** probes metadata, generates/loads waveform, then optionally computes/loads STFT and converts it to a bounded color image. Every response carries a selection/settings generation. Cancelled work cannot replace newer UI state or persist a partial analysis.
+- **Views:** model/filter/navigation, virtualized rows, bounded waveform painting, texture upload and transport-intent routing. No source decoding, FFT computation or filesystem traversal in widgets.
 
 Per-directory sorting and OS reads may still take time before cancellation is noticed. The UI remains independent, but a new analysis can wait behind an in-flight read on the analysis worker. Query filtering is currently a synchronous in-memory pass over up to 100,000 cached path strings; further performance work should measure real long-path collections rather than extrapolate from the smoke fixture.
 
@@ -44,24 +46,29 @@ Per-directory sorting and OS reads may still take time before cancellation is no
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-cargo build --release --workspace --locked
-python3 scripts/check-gui.py --screenshot /tmp/frxview.png
-python3 scripts/check-performance.py --audio
+cargo clippy --workspace --all-targets --features spectrogram --locked -- -D warnings
+cargo test --workspace --features spectrogram --locked
+cargo test --workspace --no-default-features --locked
+cargo build --release --workspace --features spectrogram --locked
+python3 scripts/check-gui.py --expect-spectrogram --demo --screenshot /tmp/frxview.png
+python3 scripts/check-performance.py --audio --spectrogram
 ```
 
-The standard suite has **26 tests** at this milestone. Added coverage includes:
+The feature-enabled suite has **43 tests**, with **35** in the waveform-only configuration. Coverage includes:
 - Filtering across incoming batches and navigation through visible results.
 - Input validation for timeline mapping.
 - Actual egui pointer input on the waveform and Space-key routing to shared transport commands.
 - Empty/populated views at 1280×800 and 900×560 with no audio device.
 - Sorted/deduplicated background discovery, latest-selection metadata/waveform ordering and cancellation under result-queue backpressure.
 - Mid-analysis cancellation without writing a partial cache entry.
+- Double-click gain reset, shared normalized-start gain, waiting/seek routing, cancellation on Stop/selection changes, and immediate ordinary playback after disabling normalization.
+- Stereo RMS/peak calibration/decay, actual normalized output, spectral calibration, anti-phase preservation, transient timing, bounds/cache validation and worker-side image delivery.
 
-The native smoke launches an actual window, uses temporary sources/catalog/cache, renders 10,000 candidates and a real decoded MP3 waveform, captures a real framebuffer PNG and closes automatically. It starts muted and does not trigger playback. The screenshot was visually inspected. [Raw run](gui-baseline.json): all 10,000 candidates loaded, 143 UI updates, largest measured `update()` CPU duration ~0.98 ms. This excludes GPU rendering, OS scheduling, window creation and screenshot encoding; it is **not** a frame-latency guarantee. Total process duration was ~9.2 s including the deliberate three-second hold, native startup, capture and teardown. A repeat also passed (~0.75 ms max update CPU, ~8.9 s total).
+The spectrogram smoke also asserts that the feature is compiled and a texture is ready. [Feature-enabled run](spectrogram-gui-baseline.json): 10,000 candidates, both analyses complete, 193 updates, maximum measured update CPU ~0.86 ms (3.36 s total including the deliberate three-second hold). The generated chirp/burst screenshot is produced by the same script with `--demo`; its timing is recorded separately in [the demo run](analysis-demo-baseline.json). No audio playback is triggered by either visual smoke.
 
-The separate muted CPAL regression passed after these changes: WAV/MP3 playback, seeking, pause/resume, rate control, EOF and file-error recovery; no additional shortages during its one-second steady-playback observation. This is not sustained-load testing or subjective listening.
+For comparison, the original native smoke launches an actual window, uses temporary sources/catalog/cache, renders 10,000 candidates and a real decoded MP3 waveform, captures a real framebuffer PNG and closes automatically. It starts muted and does not trigger playback. The screenshot was visually inspected. [Raw run](gui-baseline.json): all 10,000 candidates loaded, 143 UI updates, largest measured `update()` CPU duration ~0.98 ms. This excludes GPU rendering, OS scheduling, window creation and screenshot encoding; it is **not** a frame-latency guarantee. Total process duration was ~9.2 s including the deliberate three-second hold, native startup, capture and teardown. A repeat also passed (~0.75 ms max update CPU, ~8.9 s total).
+
+The separate muted CPAL regression passed after these changes: WAV/MP3 playback, seeking, pause/resume, rate control, normalized start/live normalization, EOF and file-error recovery; no additional shortages during its one-second steady-playback observation. Offline callback tests verify nonzero channel levels without emitting sound. This is not sustained-load testing or subjective listening.
 
 Linux startup emitted ALSA/JACK enumeration warnings for unavailable optional devices; the default output remained usable. Native chooser interaction, drag/drop interaction, accessibility, HiDPI behavior and Windows/macOS runtime behavior have **not** been end-to-end verified.
 
@@ -71,4 +78,4 @@ Linux startup emitted ALSA/JACK enumeration warnings for unavailable optional de
 
 ## Remaining work
 
-No spectrogram, magnitude spectrum, annotation editor, calibrated VU ballistics, waveform zoom/pan, pitch-preserving stretching or persisted playback settings yet. No claim of glitch-free operation on network drives or every audio driver. The backend limitations in [roadmap.md](roadmap.md) still apply.
+A separate magnitude-spectrum panel, annotation editor, IEC-calibrated VU mode, waveform/spectral zoom/pan, pitch-preserving stretching and persisted playback settings remain work. No claim of glitch-free operation on network drives or every audio driver. The backend limitations in [roadmap.md](roadmap.md) still apply.

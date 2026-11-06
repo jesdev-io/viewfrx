@@ -2,7 +2,7 @@
 
 A compact, CLI-first Rust audio browser with a **native desktop GUI**.
 
-Browse local recordings in place, inspect metadata, audition WAV/MP3, seek, change gain/rate, and generate cached waveform overviews. Source audio is never modified. Both interfaces use the same core and audio APIs.
+Browse local recordings in place, inspect metadata, audition WAV/MP3, seek, normalize peaks, change gain/rate, and generate cached waveform/spectrogram overviews. Source audio is never modified. Both interfaces use the same core and audio APIs.
 
 ## Build
 
@@ -20,15 +20,16 @@ The CLI binary is `target/release/frxview` (`frxview.exe` on Windows). Plain `ca
 ## Desktop app
 
 ```sh
-cargo run --release -p frx-gui -- /path/to/recordings
-# Or build both binaries:
-cargo build --release --workspace --locked
+cargo run --release -p frx-gui --features spectrogram -- /path/to/recordings
+# Or build both binaries with spectral analysis enabled:
+cargo build --release --workspace --features spectrogram --locked
 ./target/release/frxview-gui
 ```
 
 - **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use **+ Files**, **+ Folder**, drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
-- **Center:** technical/embedded metadata, a cached waveform, click/drag seeking, position and transport controls.
-- **Right:** output-device selection/retry, gain, pitch-changing playback rate and a live output peak meter.
+- **Center:** metadata, original waveform with a subdued −1 dBFS normalized overlay, optional source spectrogram, click/drag seeking and transport.
+- **Right:** output device, gain in dB, Normalize, pitch-changing rate, vertical stereo RMS/peak meters in dBFS, FFT size and spectral display floor.
+- **Double-click to reset:** gain returns to 0 dB/unity and unmutes; rate to 1×; toggles, device and spectral settings to their defaults. Double-click a plot to rewind.
 - **Keys:** Space play/pause; Up/Down browse visible results; Left/Right seek five seconds; Esc stop. Shortcuts do not intercept text entry.
 - **JESDEV theme:** dark compact panels, amber waveform/actions, purple playhead, bundled logo with provenance.
 
@@ -36,7 +37,9 @@ The GUI shares the CLI's catalog/cache paths (`--library` and `--cache` override
 
 On Linux the GUI uses egui/eframe with OpenGL and X11/Wayland runtime libraries; file dialogs use the desktop portal (`xdg-desktop-portal` plus a desktop-specific backend). It compiled here without additional GUI development headers. Drag-and-drop and startup paths remain alternatives if a desktop portal is unavailable. Windows/macOS native builds and dialogs remain unverified.
 
-See [GUI design, tests and limitations](docs/gui.md).
+The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. Feature builds show the spectrogram by default. See [GUI design, tests and limitations](docs/gui.md) and [level/normalization/spectral conventions](docs/analysis.md).
+
+![Native spectrogram and normalized waveform preview](docs/assets/analysis.png)
 
 ## Quick start
 
@@ -52,13 +55,18 @@ See [GUI design, tests and limitations](docs/gui.md).
 ./target/release/frxview play '/path/to/recording.wav' --gain 0.5
 ./target/release/frxview play '/path/to/recording.mp3' --rate 1.5 --seconds 10
 ./target/release/frxview waveform '/path/to/recording.wav'
+./target/release/frxview normalization '/path/to/recording.wav'
+./target/release/frxview play '/path/to/recording.wav' --normalize --gain-db -6
+./target/release/frxview spectrogram '/path/to/recording.wav' --fft-size 2048
 ```
 
 - Results are JSON; `list` emits one JSON object per file. Application errors go to stderr with a nonzero exit code; Clap usage errors use its standard text output.
 - Listing filters by extension; `inspect` and `play` validate the codec/container. Nested directories require `--recursive`; `--sort` enables alphabetical order within each directory. Directory symlinks are not followed. Overlapping imported roots can yield duplicate listing entries.
 - Catalog defaults to `.frxview/library.json` in the working directory; override with global `--library PATH`. Import is atomic, but catalog writes assume one writer at a time.
 - Waveforms default to `.frxview/waveforms`; override with `waveform --cache DIR`. `--bins` accepts powers of two from 2 to 65536. The cache budget is 64 MiB and eviction only touches frxview-owned entries.
-- Gain is linear, 0–4; 1 is unity. Output is clamped to [-1, 1] and clipped samples are counted. No automatic loudness normalization.
+- Manual gain accepts linear `--gain` (0–4, 1 is unity) or `--gain-db`. Output is clamped to [-1, 1] and clipped samples are counted.
+- `--normalize` applies linked-channel sample-peak gain to reach −1 dBFS **before manual gain**. It preserves stereo balance and leaves silence unchanged. This is not loudness/true-peak normalization or DC-offset removal. The CLI computes or loads peak analysis before starting; the GUI waits without blocking its event loop and never starts normalized playback at an unanalysed gain.
+- `spectrogram` requires its Cargo feature. The CLI returns the same calibrated, bounded STFT overview used by the GUI; its separate 64 MiB cache defaults to `.frxview/waveforms/spectrograms`.
 - Rate is 0.25–4 and **changes pitch**. Linear interpolation is a preview implementation, not antialiased resampling or pitch-preserving time stretching.
 - Use `--device INDEX` on `play` or `session` to choose an output. Indices come from `devices` and may change when hardware changes. The device's default sample rate/channel count is used; a small supported output buffer is requested.
 
@@ -84,33 +92,35 @@ Reads one JSON object per line from stdin and replies with one JSON object per l
 
 The initial reply is `{"event":"ready","protocol":1}`. Transport commands acknowledge **acceptance, not completion**. Poll `status` to observe errors, position, and state. `generation` changes as the worker applies play/seek/rate/stop; `rendered_generation` changes when frames from that generation reach the output callback. It is not DAC/audible latency. Consecutive queued play/seek commands may coalesce. Pause and gain apply immediately; changing selection preserves pause.
 
+Use `normalization PATH` to obtain the actual source peak, then send `{"op":"play_normalized","path":"/path/to/recording.wav","peak":0.5}` with that measured peak (0.5 here is only an example). For the current file, `{"op":"normalize","path":"/path/to/recording.wav","peak":0.5}` changes normalization without a seek; `"peak":null` disables it. The path guard rejects stale analysis for a different recording. Ordinary `play` resets normalization. Manual/session `gain` remains linear for compatibility; status additionally reports gain in dB, normalization gain and per-channel RMS/peak dBFS (`null` for zero).
+
 A missing/corrupt file produces an asynchronous error in status; a later successful play clears it. Device stream failures require reopening the session. Invalid commands produce an error reply without ending the session. Requests are limited to 64 KiB. EOF or `quit` stops the engine; **piping play then immediately quit does not wait for playback**. Use the one-shot `play` command for that.
 
 ## Architecture
 
 | Crate | Responsibility |
 |---|---|
-| `frx-core` | Catalog/discovery, Symphonia decoding and metadata, waveform cache |
+| `frx-core` | Discovery, decoding/metadata, level conventions, waveform and optional spectral caches |
 | `frx-audio` | Typed transport, deterministic renderer, decoder worker, CPAL callback |
 | `frx-cli` | Clap and JSON-lines adapters |
 | `frx-gui` | egui views, background adapters, generation-aware browser/analysis state |
 
 Audio streams through an 8192-frame SPSC ring. Decoding, resampling, file opening, and seeking run on a worker; the callback does no disk I/O, decoding, allocation, logging, or mutex locking. Old-generation frames are discarded after seek/switch. Whole recordings are not loaded into memory.
 
-See [architecture](docs/architecture.md), [references and branding](docs/references.md), and [remaining work](docs/roadmap.md). `goal.md` is the original, unmodified brief.
+See [architecture](docs/architecture.md), [references and branding](docs/references.md), and [remaining work](docs/roadmap.md). `goal.md` is the user-maintained brief and is never edited by implementation work. Production tuning constants live in each crate's `src/config.rs`; GUI colors live in `theme.rs`.
 
 ## Test and measure
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-cargo build --release --locked
+cargo clippy --workspace --all-targets --features spectrogram --locked -- -D warnings
+cargo test --workspace --features spectrogram --locked
+cargo test --workspace --no-default-features --locked
+cargo build --release --workspace --features spectrogram --locked
 ./target/release/frxview benchmark '/path/to/recording.wav'
 python3 scripts/check-performance.py
-python3 scripts/check-performance.py --audio  # MUTED real-device smoke test
-cargo build --release -p frx-gui --locked
-python3 scripts/check-gui.py --screenshot /tmp/frxview.png  # requires a display
+python3 scripts/check-performance.py --audio --spectrogram  # MUTED real-device smoke test
+python3 scripts/check-gui.py --expect-spectrogram --demo --screenshot /tmp/frxview.png  # needs a display
 ```
 
 Unit/integration tests do not require an audio device. WAV fixtures are generated in temporary directories; the tiny synthetic MP3 fixture is committed with its generation command. The performance script generates 60-second and 600-second WAVs and 10,000 directory entries, then removes them. FFmpeg is optional and enables an additional generated MP3 benchmark. The optional device test uses POSIX pipe polling, gain zero, and never deliberately plays the synthetic tone audibly.
@@ -119,7 +129,8 @@ Unit/integration tests do not require an audio device. WAV fixtures are generate
 
 ## Current limitations
 
-- Spectrogram, spectrum, VU ballistics, annotation editing, waveform zoom, and persisted playback preferences are not implemented. Status exposes a callback peak, not a calibrated VU meter.
+- A separate magnitude-spectrum panel, annotation editing, waveform zoom and persisted preferences remain work. The meter has a 300 ms exponential RMS envelope and decaying sample peaks; it is VU-style, **not an IEC-calibrated VU instrument**.
+- Spectrograms are bounded, linearly spaced frequency overviews with maximum aggregation, not a zoomable analysis editor or power spectral density measurement.
 - Playback supports mono/stereo; multichannel metadata/waveforms work, but auditioning >2 channels is rejected. Extra device channels are silent.
 - WAV and MP3 are tested. Other Symphonia-enabled formats may work but are not yet qualified. A truncated stream ending at a valid packet boundary may look like normal EOF; this is not an audio-file integrity checker.
 - Current-file read-ahead and a bounded overview cache exist. Next-file preloading and progressive multiresolution waveforms remain work.

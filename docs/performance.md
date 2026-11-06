@@ -27,12 +27,30 @@ Using the host's default buffer produced median switch/seek latencies near 43 ms
 
 The remaining transition gap suggests prefilling the new generation before declaring it active and refining wakeup scheduling. It must be investigated without simply suppressing shortage telemetry. Smooth de-click envelopes and bandlimited resampling are also needed before claiming high-quality auditioning.
 
+## Level/spectrogram follow-up
+
+[Feature-enabled raw observations](analysis-baseline.json), same local release environment:
+
+| Workload | Observation |
+|---|---:|
+| 600 s stereo STFT overview, empty analysis cache | ~1257 ms |
+| Same STFT overview, populated cache | ~25.5 ms |
+| Stored overview | 440 time columns × 256 frequency bands |
+| Muted switch / seek medians | ~7.75 / ~5.55 ms |
+| Steady one-second observation | 0 additional shortages |
+
+The updated device script also verifies live normalization, normalized start, restoration of ordinary gain and preservation of mute. Its fixture peak is −26.23 dBFS; computed auto gain is +25.23 dB, targeting −1 dBFS before manual gain. Nonzero output/meter correctness is covered by offline callback tests, not an audible hardware test. Transition shortages still occur; the steady-state result is not a whole-session claim.
+
+[Native spectral GUI run](spectrogram-gui-baseline.json): 10,000 candidates, completed waveform/spectrogram, maximum measured update CPU ~0.86 ms. This excludes GPU/display latency and startup/capture/teardown; see [GUI verification](gui.md). The separate chirp/burst demo uses actual decoded samples and is recorded in [analysis-demo-baseline.json](analysis-demo-baseline.json).
+
+An additional [uncached 10-minute WAV GUI run](long-analysis-gui-baseline.json) completed waveform and spectral analysis while rendering 297 updates during a five-second hold. Maximum measured update CPU was ~1.31 ms. This exercises background analysis of a longer recording, but remains a warm-filesystem smoke test rather than a sustained-load guarantee.
+
 ## Reproduce
 
 ```sh
-cargo build --release --locked
-python3 scripts/check-performance.py
-python3 scripts/check-performance.py --audio
+cargo build --release --workspace --features spectrogram --locked
+python3 scripts/check-performance.py --spectrogram
+python3 scripts/check-performance.py --audio --spectrogram
 # Select another output if desired:
 python3 scripts/check-performance.py --audio --device 1
 ```
