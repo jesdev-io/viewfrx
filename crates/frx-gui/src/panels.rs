@@ -576,10 +576,11 @@ impl App {
                         let wave_height = total_height;
                         ui.horizontal_wrapped(|ui| {
                             ui.label(
-                                RichText::new("ORIGINAL")
+                                RichText::new("ORIGINAL (DC-REMOVED)")
                                     .size(l::SMALL_FONT)
                                     .color(theme::AMBER),
-                            );
+                            )
+                            .on_hover_text("Playback removes the DC offset; it is listed as a file parameter in dBFS.");
                             ui.label(
                                 RichText::new(format!(
                                     "AUTO-SCALED TO {NORMALIZE_TARGET_DBFS:.0} dBFS"

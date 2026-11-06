@@ -227,6 +227,12 @@ pub fn waveform_channel_view(
         let peaks = channel
             .and_then(|c| waveform.channel_peaks.get(c))
             .unwrap_or(&waveform.peaks);
+        // Playback removes the per-channel DC offset, so the plot shows the
+        // DC-removed signal (the file's DC offset is listed separately in dBFS).
+        let dc = channel
+            .and_then(|c| waveform.dc_offset.get(c))
+            .copied()
+            .unwrap_or(0.0);
         let columns = (rect.width().ceil() as usize).max(1).min(peaks.len());
         let normalized = waveform.normalization().map_or(1.0, |n| n.gain);
         // Two passes guarantee the original is in front, never painted over by
@@ -238,7 +244,7 @@ pub fn waveform_channel_view(
                 let (min, max) = peaks[start..end]
                     .iter()
                     .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), p| {
-                        (min.min(p.min), max.max(p.max))
+                        (min.min(p.min - dc), max.max(p.max - dc))
                     });
                 let x = rect.left() + (column as f32 + 0.5) / columns as f32 * rect.width();
                 let scale = rect.height() * l::WAVE_SCALE;
