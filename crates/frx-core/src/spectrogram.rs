@@ -157,12 +157,25 @@ pub fn analyze(
     settings: Settings,
     cancelled: impl Fn() -> bool,
 ) -> Result<Spectrogram> {
+    analyze_channel(path, settings, None, cancelled)
+}
+
+/// None averages channel powers; Some selects a zero-based source channel.
+pub fn analyze_channel(
+    path: &Path,
+    settings: Settings,
+    channel: Option<usize>,
+    cancelled: impl Fn() -> bool,
+) -> Result<Spectrogram> {
     settings.validate()?;
     if cancelled() {
         bail!("analysis cancelled");
     }
     let mut reader = AudioReader::open(path)?;
     let channels = reader.info().channels;
+    if channel.is_some_and(|c| c >= channels) {
+        bail!("source channel does not exist");
+    }
     if channels > MAX_CHANNELS {
         bail!("spectrogram supports at most {MAX_CHANNELS} channels");
     }
@@ -188,7 +201,8 @@ pub fn analyze(
             }
             processed += 1;
             if processed >= size as u64 && (processed - size as u64).is_multiple_of(hop as u64) {
-                overview.push(&transform.spectrum(&ring, (processed % size as u64) as usize)?);
+                let selected = channel.map_or(ring.as_slice(), |c| &ring[c..c + 1]);
+                overview.push(&transform.spectrum(selected, (processed % size as u64) as usize)?);
             }
             Ok(())
         };
@@ -238,8 +252,17 @@ impl SpectrogramCache {
         settings: Settings,
         cancelled: impl Fn() -> bool,
     ) -> Result<CachedSpectrogram> {
+        self.get_channel(path, settings, None, cancelled)
+    }
+    pub fn get_channel(
+        &self,
+        path: &Path,
+        settings: Settings,
+        channel: Option<usize>,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<CachedSpectrogram> {
         settings.validate()?;
-        let parameters = serde_json::to_vec(&(CACHE_VERSION, settings))?;
+        let parameters = serde_json::to_vec(&(CACHE_VERSION, settings, channel))?;
         let key = cache::key(path, &parameters)?;
         let entry = self.directory.join(format!("frx-spectrogram-{key}.json"));
         if cancelled() {
@@ -251,7 +274,7 @@ impl SpectrogramCache {
                 spectrogram,
             });
         }
-        let spectrogram = analyze(path, settings, &cancelled)?;
+        let spectrogram = analyze_channel(path, settings, channel, &cancelled)?;
         if cancelled() {
             bail!("analysis cancelled");
         }

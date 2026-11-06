@@ -455,17 +455,6 @@ impl App {
                         };
                         #[cfg(not(feature = "spectrogram"))]
                         let wave_height = total_height;
-                        #[cfg(feature = "spectrogram")]
-                        if self.spectral.enabled {
-                            let response = self.spectral.paint(
-                                ui,
-                                position,
-                                duration,
-                                total_height * l::SPECTRAL_HEIGHT_FRACTION,
-                            );
-                            self.handle_seek(response);
-                            ui.add_space(l::SPACE_SMALL);
-                        }
                         ui.horizontal_wrapped(|ui| {
                             ui.label(
                                 RichText::new("ORIGINAL")
@@ -483,14 +472,39 @@ impl App {
                                 ui.spinner();
                             }
                         });
-                        let response = widgets::waveform_view(
-                            ui,
-                            self.waveform.as_ref(),
-                            position,
-                            duration,
-                            wave_height,
-                        );
-                        self.handle_seek(response);
+                        let stereo = self.info.as_ref().is_some_and(|i| i.channels == 2);
+                        self.wave_channels.control(ui, "Waveform", stereo);
+                        let channels = self.wave_channels.indices(stereo);
+                        for &ch in channels {
+                            if stereo {
+                                ui.small(if ch == 0 { "WAVE L" } else { "WAVE R" });
+                            }
+                            let response = widgets::waveform_channel_view(
+                                ui,
+                                self.waveform.as_ref(),
+                                position,
+                                duration,
+                                wave_height / channels.len() as f32,
+                                Some(ch),
+                            );
+                            self.handle_seek(response);
+                        }
+                        #[cfg(feature = "spectrogram")]
+                        if self.spectral.enabled {
+                            self.spectral.channels.control(ui, "Spectrogram", stereo);
+                            let channels = self.spectral.channels.indices(stereo);
+                            for &ch in channels {
+                                let response = self.spectral.paint(
+                                    ui,
+                                    position,
+                                    duration,
+                                    total_height * l::SPECTRAL_HEIGHT_FRACTION
+                                        / channels.len() as f32,
+                                    ch,
+                                );
+                                self.handle_seek(response);
+                            }
+                        }
                         ui.horizontal(|ui| {
                             ui.monospace(clock(position));
                             ui.with_layout(

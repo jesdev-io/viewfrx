@@ -8,6 +8,42 @@ use frx_audio::Status;
 use frx_core::waveform::Waveform;
 use std::ops::RangeInclusive;
 
+#[derive(Clone, Copy, Default, PartialEq)]
+pub enum Channels {
+    Left,
+    Right,
+    #[default]
+    Both,
+}
+impl Channels {
+    pub fn indices(self, stereo: bool) -> &'static [usize] {
+        if !stereo {
+            return &[0];
+        }
+        match self {
+            Self::Left => &[0],
+            Self::Right => &[1],
+            Self::Both => &[0, 1],
+        }
+    }
+    pub fn control(&mut self, ui: &mut egui::Ui, label: &str, stereo: bool) {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            if stereo {
+                for (value, text) in [
+                    (Self::Left, "Left"),
+                    (Self::Right, "Right"),
+                    (Self::Both, "Both"),
+                ] {
+                    if ui.selectable_value(self, value, text).double_clicked() {
+                        *self = Self::Both;
+                    }
+                }
+            }
+        });
+    }
+}
+
 pub fn reset_slider(
     ui: &mut egui::Ui,
     value: &mut f64,
@@ -129,12 +165,24 @@ pub fn stereo_meter(ui: &mut egui::Ui, status: Option<&Status>) {
     }
 }
 
+#[cfg(test)]
 pub fn waveform_view(
     ui: &mut egui::Ui,
     waveform: Option<&Waveform>,
     position: f64,
     duration: f64,
     height: f32,
+) -> Response {
+    waveform_channel_view(ui, waveform, position, duration, height, None)
+}
+
+pub fn waveform_channel_view(
+    ui: &mut egui::Ui,
+    waveform: Option<&Waveform>,
+    position: f64,
+    duration: f64,
+    height: f32,
+    channel: Option<usize>,
 ) -> Response {
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
@@ -155,17 +203,18 @@ pub fn waveform_view(
         );
     }
     if let Some(waveform) = waveform {
-        let columns = (rect.width().ceil() as usize)
-            .max(1)
-            .min(waveform.peaks.len());
+        let peaks = channel
+            .and_then(|c| waveform.channel_peaks.get(c))
+            .unwrap_or(&waveform.peaks);
+        let columns = (rect.width().ceil() as usize).max(1).min(peaks.len());
         let normalized = waveform.normalization().map_or(1.0, |n| n.gain);
         // Two passes guarantee the original is in front, never painted over by
         // the quieter normalization preview. Both are source-relative, not live gain.
         for (gain, color) in [(normalized, theme::NORMALIZED_WAVE), (1.0, theme::AMBER)] {
             for column in 0..columns {
-                let start = column * waveform.peaks.len() / columns;
-                let end = ((column + 1) * waveform.peaks.len() / columns).max(start + 1);
-                let (min, max) = waveform.peaks[start..end]
+                let start = column * peaks.len() / columns;
+                let end = ((column + 1) * peaks.len() / columns).max(start + 1);
+                let (min, max) = peaks[start..end]
                     .iter()
                     .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), p| {
                         (min.min(p.min), max.max(p.max))

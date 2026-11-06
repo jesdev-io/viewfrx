@@ -71,6 +71,12 @@ enum Action {
         fft_size: usize,
         #[arg(long, default_value = SPECTROGRAM_CACHE)]
         cache: PathBuf,
+        /// Select a source channel (0 = Left, 1 = Right).
+        #[arg(long, conflicts_with = "stereo")]
+        channel: Option<usize>,
+        /// Return separate Left and Right analyses (stereo sources only).
+        #[arg(long)]
+        stereo: bool,
     },
     /// List current output devices (indices are session-local, not persistent IDs).
     Devices,
@@ -184,13 +190,22 @@ fn run() -> Result<()> {
             path,
             fft_size,
             cache,
+            channel,
+            stereo,
         } => {
             use frx_core::spectrogram::{Settings, SpectrogramCache};
-            emit(&SpectrogramCache::new(cache_path(cache)).get(
-                &path,
-                Settings { fft_size },
-                || false,
-            )?)?;
+            let cache = SpectrogramCache::new(cache_path(cache));
+            if stereo {
+                if inspect(&path)?.channels != 2 {
+                    bail!("--stereo requires a stereo recording");
+                }
+                let channels = (0..2)
+                    .map(|ch| cache.get_channel(&path, Settings { fft_size }, Some(ch), || false))
+                    .collect::<Result<Vec<_>>>()?;
+                emit(&channels)?;
+            } else {
+                emit(&cache.get_channel(&path, Settings { fft_size }, channel, || false)?)?;
+            }
         }
         Action::Devices => emit(&frx_audio::devices()?)?,
         Action::Play {

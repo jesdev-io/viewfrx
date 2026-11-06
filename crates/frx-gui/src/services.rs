@@ -379,6 +379,8 @@ impl AnalysisService {
                 let cancelled =
                     || stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != id;
                 let info = inspect(&path).map_err(|e| format!("{e:#}"));
+                #[cfg(feature = "spectrogram")]
+                let stereo = info.as_ref().is_ok_and(|i| i.channels == 2);
                 let valid = info.is_ok();
                 if !deliver(&tx, AnalysisEvent::Metadata(id, info), cancelled, &ctx) || !valid {
                     continue;
@@ -392,10 +394,27 @@ impl AnalysisService {
                 }
                 #[cfg(feature = "spectrogram")]
                 if let Some(settings) = job.options.spectral {
-                    let spectrum = spectral_cache
-                        .get(&path, settings.analysis, cancelled)
-                        .map(|cached| crate::spectral::render(cached.spectrogram, settings))
-                        .map_err(|e| format!("{e:#}"));
+                    let spectrum = (|| -> anyhow::Result<_> {
+                        let cached = spectral_cache.get_channel(
+                            &path,
+                            settings.analysis,
+                            Some(0),
+                            cancelled,
+                        )?;
+                        let mut rendered = crate::spectral::render(cached.spectrogram, settings);
+                        if stereo && let Some(left) = &mut rendered {
+                            let cached = spectral_cache.get_channel(
+                                &path,
+                                settings.analysis,
+                                Some(1),
+                                cancelled,
+                            )?;
+                            left.right = crate::spectral::render(cached.spectrogram, settings)
+                                .map(|r| r.image);
+                        }
+                        Ok(rendered)
+                    })()
+                    .map_err(|e| format!("{e:#}"));
                     deliver(
                         &tx,
                         AnalysisEvent::Spectrogram(id, spectrum),

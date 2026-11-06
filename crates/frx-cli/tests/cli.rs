@@ -66,6 +66,12 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
     assert_eq!(second["cache_hit"], false);
     assert!(!dir.path().join(".frxview").exists());
     assert_eq!(first["waveform"], second["waveform"]);
+    assert_eq!(first["waveform"]["channel_peaks"][0][0]["min"], 0.25);
+    assert_eq!(first["waveform"]["channel_peaks"][1][0]["max"], -0.25);
+    assert_eq!(
+        first["waveform"]["dc_offset"],
+        serde_json::json!([0.25, -0.25])
+    );
     let benchmark = success(run(
         dir.path(),
         &[
@@ -103,6 +109,19 @@ fn spectrogram_cli_is_calibrated_cached_and_validates_fft_size() {
     assert_eq!(second["cache_hit"], false);
     assert!(!dir.path().join(".frxview").exists());
     assert_eq!(first["spectrogram"], second["spectrogram"]);
+    let channels = success(run(
+        dir.path(),
+        &["spectrogram", "with spaces.WAV", "--stereo"],
+    ));
+    assert_eq!(channels.as_array().unwrap().len(), 2);
+    assert!(
+        !run(
+            dir.path(),
+            &["spectrogram", "with spaces.WAV", "--channel", "2"]
+        )
+        .status
+        .success()
+    );
     let spectrum = &first["spectrogram"];
     assert_eq!(spectrum["frames"], 8000);
     assert!(spectrum["columns"].as_u64().unwrap() <= 512);

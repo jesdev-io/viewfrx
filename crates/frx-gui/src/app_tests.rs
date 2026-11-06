@@ -64,6 +64,7 @@ fn normalized_start_uses_the_same_peak_as_the_ghost_waveform() {
             min: -0.25,
             max: 0.1,
         }],
+        ..Default::default()
     });
     let preview = app.waveform.as_ref().unwrap().normalization().unwrap();
     app.start_selected();
@@ -88,6 +89,7 @@ fn peak_fixture() -> Waveform {
             min: -0.25,
             max: 0.1,
         }],
+        ..Default::default()
     }
 }
 
@@ -192,6 +194,7 @@ fn empty_and_populated_views_render_without_an_audio_device() {
                     };
                     2
                 ],
+                ..Default::default()
             });
         }
         for size in [vec2(1280.0, 800.0), vec2(900.0, 560.0)] {

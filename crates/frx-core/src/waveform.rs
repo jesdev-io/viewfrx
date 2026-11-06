@@ -12,13 +12,16 @@ pub struct Peak {
     pub max: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Waveform {
     pub sample_rate: u32,
     pub frames: u64,
     pub frames_per_bin: u64,
     /// Peaks across all channels; not an amplitude-cancelling mono mix.
     pub peaks: Vec<Peak>,
+    pub channel_peaks: Vec<Vec<Peak>>,
+    /// Signed arithmetic mean of every decoded channel (linear amplitude).
+    pub dc_offset: Vec<f32>,
 }
 
 impl Waveform {
@@ -63,7 +66,15 @@ pub fn analyze_cancellable(
         frames: 0,
         frames_per_bin: 1,
         peaks: Vec::with_capacity(max_bins),
+        channel_peaks: vec![Vec::with_capacity(max_bins); frame.len()],
+        dc_offset: vec![0.0; frame.len()],
     };
+    let mut sums = vec![0.0f64; frame.len()];
+    let empty = Peak {
+        min: f32::INFINITY,
+        max: f32::NEG_INFINITY,
+    };
+    let mut channels = vec![empty; frame.len()];
     let mut current = Peak {
         min: f32::INFINITY,
         max: f32::NEG_INFINITY,
@@ -73,7 +84,10 @@ pub fn analyze_cancellable(
         if result.frames.is_multiple_of(ANALYSIS_CANCEL_INTERVAL) && cancelled() {
             bail!("analysis cancelled");
         }
-        for &sample in &frame {
+        for (ch, &sample) in frame.iter().enumerate() {
+            sums[ch] += sample as f64;
+            channels[ch].min = channels[ch].min.min(sample);
+            channels[ch].max = channels[ch].max.max(sample);
             current.min = current.min.min(sample);
             current.max = current.max.max(sample);
         }
@@ -81,27 +95,44 @@ pub fn analyze_cancellable(
         count += 1;
         if count == result.frames_per_bin {
             result.peaks.push(current);
+            for (bins, peak) in result.channel_peaks.iter_mut().zip(&mut channels) {
+                bins.push(*peak);
+                *peak = empty;
+            }
             current = Peak {
                 min: f32::INFINITY,
                 max: f32::NEG_INFINITY,
             };
             count = 0;
             if result.peaks.len() == max_bins {
-                for i in 0..max_bins / 2 {
-                    let a = result.peaks[2 * i];
-                    let b = result.peaks[2 * i + 1];
-                    result.peaks[i] = Peak {
-                        min: a.min.min(b.min),
-                        max: a.max.max(b.max),
-                    };
+                for bins in
+                    std::iter::once(&mut result.peaks).chain(result.channel_peaks.iter_mut())
+                {
+                    for i in 0..max_bins / 2 {
+                        let a = bins[2 * i];
+                        let b = bins[2 * i + 1];
+                        bins[i] = Peak {
+                            min: a.min.min(b.min),
+                            max: a.max.max(b.max),
+                        };
+                    }
+                    bins.truncate(max_bins / 2);
                 }
-                result.peaks.truncate(max_bins / 2);
                 result.frames_per_bin *= 2;
             }
         }
     }
     if count > 0 {
         result.peaks.push(current);
+        for (bins, peak) in result.channel_peaks.iter_mut().zip(channels) {
+            bins.push(peak);
+        }
+    }
+    if result.frames > 0 {
+        result.dc_offset = sums
+            .into_iter()
+            .map(|sum| (sum / result.frames as f64) as f32)
+            .collect();
     }
     Ok(result)
 }
@@ -115,7 +146,14 @@ fn read_cached(path: &Path, bins: usize) -> Option<Waveform> {
         .read_to_end(&mut bytes)
         .ok()?;
     let waveform: Waveform = serde_json::from_slice(&bytes).ok()?;
-    if waveform.peaks.len() > bins
+    if waveform.channel_peaks.len() != waveform.dc_offset.len()
+        || waveform.dc_offset.iter().any(|v| !v.is_finite())
+        || waveform.channel_peaks.iter().any(|c| {
+            c.len() != waveform.peaks.len()
+                || c.iter()
+                    .any(|p| !p.min.is_finite() || !p.max.is_finite() || p.min > p.max)
+        })
+        || waveform.peaks.len() > bins
         || waveform.sample_rate == 0
         || waveform.frames_per_bin == 0
         || waveform

@@ -17,6 +17,7 @@ pub struct RenderSettings {
 }
 pub struct RenderedSpectrum {
     pub image: egui::ColorImage,
+    pub right: Option<egui::ColorImage>,
     pub nyquist_hz: f32,
 }
 
@@ -50,6 +51,7 @@ pub fn render(data: Spectrogram, settings: RenderSettings) -> Option<RenderedSpe
         .collect();
     Some(RenderedSpectrum {
         image: egui::ColorImage::new([data.columns, data.frequency_bins], pixels),
+        right: None,
         nyquist_hz: data.sample_rate as f32 / 2.0,
     })
 }
@@ -60,6 +62,8 @@ pub struct View {
     fft_size: usize,
     floor_db: f64,
     texture: Option<egui::TextureHandle>,
+    right: Option<egui::TextureHandle>,
+    pub channels: widgets::Channels,
     nyquist_hz: f32,
 }
 impl Default for View {
@@ -70,6 +74,8 @@ impl Default for View {
             fft_size: dsp::DEFAULT_FFT_SIZE,
             floor_db: c::SPECTRAL_FLOOR_DEFAULT,
             texture: None,
+            right: None,
+            channels: Default::default(),
             nyquist_hz: 0.0,
         }
     }
@@ -85,6 +91,7 @@ impl View {
     }
     pub fn clear(&mut self) {
         self.texture = None;
+        self.right = None;
         self.pending = self.enabled;
     }
     pub fn controls(&mut self, ui: &mut egui::Ui) -> bool {
@@ -126,7 +133,11 @@ impl View {
     ) -> Result<(), String> {
         self.pending = false;
         let rendered = result?;
+        self.right = None;
         self.texture = rendered.map(|rendered| {
+            self.right = rendered.right.map(|image| {
+                ctx.load_texture("spectrogram-right", image, egui::TextureOptions::LINEAR)
+            });
             self.nyquist_hz = rendered.nyquist_hz;
             ctx.load_texture("spectrogram", rendered.image, egui::TextureOptions::LINEAR)
         });
@@ -141,12 +152,21 @@ impl View {
         position: f64,
         duration: f64,
         height: f32,
+        channel: usize,
     ) -> egui::Response {
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("SOURCE SPECTROGRAM · dBFS")
-                    .size(l::SMALL_FONT)
-                    .color(theme::MUTED),
+                egui::RichText::new(if self.right.is_some() {
+                    if channel == 0 {
+                        "SPEC L · dBFS"
+                    } else {
+                        "SPEC R · dBFS"
+                    }
+                } else {
+                    "SPECTROGRAM · dBFS"
+                })
+                .size(l::SMALL_FONT)
+                .color(theme::MUTED),
             );
             if self.pending {
                 ui.spinner();
@@ -156,7 +176,11 @@ impl View {
             ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, l::PLOT_RADIUS, theme::PANEL);
-        if let Some(texture) = &self.texture {
+        if let Some(texture) = if channel == 0 {
+            &self.texture
+        } else {
+            &self.right
+        } {
             painter.image(
                 texture.id(),
                 rect,
