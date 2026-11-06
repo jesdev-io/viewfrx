@@ -84,7 +84,10 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
         ],
     ));
     assert_eq!(benchmark["frames"], 4000);
-    assert_eq!(benchmark["sum_squares"], 500.0);
+    // Playback DSP removes the fixture's pure DC offset (L=+0.25, R=-0.25),
+    // so only the startup transient energy remains instead of 500.0.
+    let dc_energy = benchmark["sum_squares"].as_f64().unwrap();
+    assert!(dc_energy < 100.0, "DC offset must be removed: {dc_energy}");
     // The fixture is pure DC (L=+0.25, R=-0.25): it is listed as a file
     // parameter in dBFS and excluded from normalization, which therefore
     // leaves the (now silent) signal at unity gain.
@@ -117,7 +120,8 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
     assert_eq!(left["waveform"]["channel"], 1);
     assert!(!run(dir.path(), &["waveform", "with spaces.WAV", "--channel", "2"]).status.success());
     assert!(!run(dir.path(), &["waveform", "with spaces.WAV", "--stereo", "--channel", "0"]).status.success());
-    // A real AC signal still normalizes to -1 dBFS after DC removal.
+    // A real AC signal (1 kHz sine, antiphase stereo) still normalizes to
+    // -1 dBFS after DC removal.
     let mut w = hound::WavWriter::create(
         dir.path().join("tone.WAV"),
         hound::WavSpec {
@@ -129,19 +133,48 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
     )
     .unwrap();
     for i in 0..8000 {
-        let v = if i % 2 == 0 { 8192i16 } else { -8192 };
+        let v = (0.25 * (std::f32::consts::TAU * 1000.0 * i as f32 / 8000.0).sin() * 32767.0) as i16;
         w.write_sample(v).unwrap();
         w.write_sample(-v).unwrap();
     }
     w.finalize().unwrap();
     let norm = success(run(dir.path(), &["normalization", "tone.WAV"]));
-    assert_eq!(norm["source_peak"], 0.25);
+    let peak = norm["source_peak"].as_f64().unwrap();
+    assert!((peak - 0.25).abs() < 1e-3, "{peak}");
     assert_eq!(norm["target_dbfs"], -1.0);
-    let actual = 20.0 * (norm["gain"].as_f64().unwrap() * 0.25).log10();
-    assert!((actual + 1.0).abs() < 1e-5);
+    let actual = 20.0 * (norm["gain"].as_f64().unwrap() * peak).log10();
+    assert!((actual + 1.0).abs() < 1e-3);
     let levels = success(run(dir.path(), &["levels", "tone.WAV"]));
-    assert_eq!(levels["levels"]["dc_offset"], serde_json::json!([0.0, 0.0]));
-    assert_eq!(levels["levels"]["dc_offset_dbfs"][0], serde_json::Value::Null);
+    for dc in levels["levels"]["dc_offset"].as_array().unwrap() {
+        assert!(dc.as_f64().unwrap().abs() < 1e-4, "{dc}");
+    }
+    for db in levels["levels"]["dc_offset_dbfs"].as_array().unwrap() {
+        // Quantization leaves a negligible DC residual: null or very low dBFS.
+        match db.as_f64() {
+            Some(v) => assert!(v < -60.0, "{v}"),
+            None => {}
+        }
+    }
+    // AC content passes the always-on DC blocker: ~500.0 minus the short
+    // onset/offset fade at the file edges.
+    let ac = success(run(
+        dir.path(),
+        &["benchmark", "tone.WAV", "--sample-rate", "8000", "--rate", "2"],
+    ));
+    assert_eq!(ac["frames"], 4000);
+    // 1 kHz sine at amplitude 0.25: RMS energy 4000 * 2 * (0.25^2 / 2) = 250,
+    // minus only the short onset/offset fade. The DC blocker must pass it.
+    let energy = ac["sum_squares"].as_f64().unwrap();
+    assert!((energy - 250.0).abs() < 10.0, "AC must pass DC blocker: {energy}");
+    let hp = success(run(
+        dir.path(),
+        &["benchmark", "tone.WAV", "--sample-rate", "8000", "--rate", "2", "--highpass"],
+    ));
+    let hp_energy = hp["sum_squares"].as_f64().unwrap();
+    assert!(
+        (hp_energy - energy).abs() < 10.0,
+        "20 Hz highpass must not touch a 1 kHz tone: {hp_energy}"
+    );
 }
 
 #[cfg(feature = "spectrogram")]

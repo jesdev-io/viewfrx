@@ -34,7 +34,13 @@ fn play_seek_switch_stop_and_recovery_invalidate_old_audio() -> Result<()> {
         8000,
     )?;
     assert_eq!(status(&shared).state, "playing");
-    assert_eq!(renderer.as_mut().unwrap().next_frame()?.unwrap(), [0.25; 2]);
+    // The first frame is onset-faded and DC is removed, so assert on the
+    // transient sign after the fade instead of an exact DC sample value.
+    for _ in 0..100 {
+        renderer.as_mut().unwrap().next_frame()?;
+    }
+    let frame = renderer.as_mut().unwrap().next_frame()?.unwrap();
+    assert!(frame[0] > 0.1, "positive DC transient of a.wav: {frame:?}");
     let first = status(&shared).generation;
     shared.paused.store(true, Ordering::Release);
     apply(Command::Seek { seconds: 1.0 }, &mut renderer, &shared, 8000)?;
@@ -47,10 +53,11 @@ fn play_seek_switch_stop_and_recovery_invalidate_old_audio() -> Result<()> {
         "paused",
         "selection must not undo a newer pause"
     );
-    assert_eq!(
-        renderer.as_mut().unwrap().next_frame()?.unwrap(),
-        [-0.25; 2]
-    );
+    for _ in 0..100 {
+        renderer.as_mut().unwrap().next_frame()?;
+    }
+    let frame = renderer.as_mut().unwrap().next_frame()?.unwrap();
+    assert!(frame[0] < -0.1, "negative DC transient of b.wav: {frame:?}");
     apply(Command::Stop, &mut renderer, &shared, 8000)?;
     assert!(renderer.is_none());
     assert_eq!(status(&shared).state, "stopped");

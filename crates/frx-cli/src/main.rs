@@ -111,6 +111,9 @@ enum Action {
         cache: PathBuf,
         #[arg(long, default_value_t = 1.0)]
         rate: f64,
+        /// Fixed highpass to remove infra-sound content (DC blocker is always on).
+        #[arg(long)]
+        highpass: bool,
         #[arg(long)]
         seconds: Option<f64>,
     },
@@ -126,6 +129,9 @@ enum Action {
         sample_rate: u32,
         #[arg(long, default_value_t = 1.0)]
         rate: f64,
+        /// Apply the fixed infra-sound highpass like playback does.
+        #[arg(long)]
+        highpass: bool,
     },
 }
 
@@ -260,6 +266,7 @@ fn run() -> Result<()> {
             normalize,
             cache,
             rate,
+            highpass,
             seconds,
         } => {
             if seconds.is_some_and(|s| !s.is_finite() || s <= 0.0) {
@@ -268,10 +275,12 @@ fn run() -> Result<()> {
             let gain = gain_db.map_or(gain, db_to_gain);
             frx_audio::render::validate_gain(gain)?;
             let command = if normalize {
+                // DC-removed peak: DC offset must not steer the auto gain.
                 let peak = WaveformCache::new(cache_path(cache))
                     .get(&path, DEFAULT_WAVEFORM_BINS)?
                     .waveform
-                    .sample_peak();
+                    .normalization()?
+                    .source_peak;
                 Command::PlayNormalized { path, peak }
             } else {
                 Command::Play { path }
@@ -279,6 +288,7 @@ fn run() -> Result<()> {
             let engine = Engine::open(device)?;
             engine.execute(Command::Gain { value: gain })?;
             engine.execute(Command::Rate { value: rate })?;
+            engine.execute(Command::Highpass { enabled: highpass })?;
             engine.execute(command)?;
             let start = Instant::now();
             loop {
@@ -300,9 +310,11 @@ fn run() -> Result<()> {
             path,
             sample_rate,
             rate,
+            highpass,
         } => {
             let start = Instant::now();
             let mut renderer = frx_audio::render::Renderer::open(&path, sample_rate, rate)?;
+            renderer.set_highpass(highpass);
             let opened = start.elapsed();
             let first = renderer.next_frame()?;
             let first_frame_ms = start.elapsed().as_secs_f64() * 1000.0;

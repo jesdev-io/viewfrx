@@ -49,6 +49,11 @@ pub enum Command {
     Rate {
         value: f64,
     },
+    /// Toggle the fixed highpass that removes infra-sound content. The DC
+    /// blocker is always on; this is the optional additional fixed highpass.
+    Highpass {
+        enabled: bool,
+    },
     Gain {
         value: f32,
     },
@@ -69,6 +74,7 @@ pub struct Status {
     pub rms_dbfs: [Option<f32>; 2],
     pub peak_dbfs: [Option<f32>; 2],
     pub rate: f64,
+    pub highpass: bool,
     pub peak: f32,
     pub underrun_callbacks: u64,
     pub clipped_samples: u64,
@@ -83,6 +89,7 @@ struct Detail {
     path: Option<PathBuf>,
     error: Option<String>,
     rate: f64,
+    highpass: bool,
 }
 
 struct Shared {
@@ -130,6 +137,7 @@ impl Default for Shared {
             clipped: AtomicU64::new(0),
             detail: Mutex::new(Detail {
                 rate: 1.0,
+                highpass: false,
                 ..Default::default()
             }),
         }
@@ -295,6 +303,7 @@ fn status(shared: &Shared) -> Status {
             ))
         }),
         rate: detail.rate,
+        highpass: detail.highpass,
         peak: f32::from_bits(shared.peak.load(Ordering::Relaxed)),
         underrun_callbacks: shared.underruns.load(Ordering::Relaxed),
         clipped_samples: shared.clipped.load(Ordering::Relaxed),
@@ -346,6 +355,13 @@ fn apply(
             }
             shared.detail.lock().unwrap().rate = value;
         }
+        Command::Highpass { enabled } => {
+            // Filter state is continuous, so toggling needs no seek/restart.
+            if let Some(renderer) = renderer.as_mut() {
+                renderer.set_highpass(enabled);
+            }
+            shared.detail.lock().unwrap().highpass = enabled;
+        }
         Command::Stop => {
             invalidate(shared);
             *renderer = None;
@@ -389,13 +405,15 @@ fn load(
     shared.loading.store(true, Ordering::Release);
     shared.position.store(0f64.to_bits(), Ordering::Release);
     set_normalization(shared, peak)?;
-    let rate = {
+    let (rate, highpass) = {
         let mut detail = shared.detail.lock().unwrap();
         detail.path = Some(path.clone());
         detail.error = None;
-        detail.rate
+        (detail.rate, detail.highpass)
     };
-    *renderer = Some(Renderer::open(&path, sample_rate, rate)?);
+    let mut new_renderer = Renderer::open(&path, sample_rate, rate)?;
+    new_renderer.set_highpass(highpass);
+    *renderer = Some(new_renderer);
     // Preserve the latest immediate pause request across a queued load.
     shared.active.store(true, Ordering::Release);
     Ok(())
