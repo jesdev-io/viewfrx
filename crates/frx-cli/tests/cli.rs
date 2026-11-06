@@ -78,6 +78,65 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
     ));
     assert_eq!(benchmark["frames"], 4000);
     assert_eq!(benchmark["sum_squares"], 500.0);
+    let norm = success(run(dir.path(), &["normalization", "with spaces.WAV"]));
+    assert_eq!(norm["source_peak"], 0.25);
+    assert_eq!(norm["target_dbfs"], -1.0);
+    let actual = 20.0 * (norm["gain"].as_f64().unwrap() * 0.25).log10();
+    assert!((actual + 1.0).abs() < 1e-5);
+}
+
+#[cfg(feature = "spectrogram")]
+#[test]
+fn spectrogram_cli_is_calibrated_cached_and_validates_fft_size() {
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let first = success(run(
+        dir.path(),
+        &["spectrogram", "with spaces.WAV", "--fft-size", "512"],
+    ));
+    let second = success(run(
+        dir.path(),
+        &["spectrogram", "with spaces.WAV", "--fft-size", "512"],
+    ));
+    assert_eq!(first["cache_hit"], false);
+    assert_eq!(second["cache_hit"], true);
+    assert_eq!(first["spectrogram"], second["spectrogram"]);
+    let spectrum = &first["spectrogram"];
+    assert_eq!(spectrum["frames"], 8000);
+    assert!(spectrum["columns"].as_u64().unwrap() <= 512);
+    // Test DC calibration on every full stationary window. Centered boundary
+    // padding introduces a real DC step and therefore spectral transients; it
+    // must not be mistaken for another full window of the constant fixture.
+    let bins = spectrum["frequency_bins"].as_u64().unwrap() as usize;
+    let fft = spectrum["fft_size"].as_u64().unwrap();
+    let hop = spectrum["hop_size"].as_u64().unwrap();
+    let frames = spectrum["frames"].as_u64().unwrap();
+    let mut checked = 0;
+    for (column, values) in spectrum["dbfs"]
+        .as_array()
+        .unwrap()
+        .chunks_exact(bins)
+        .enumerate()
+    {
+        let center = column as u64 * hop;
+        if center >= fft / 2 && center + fft / 2 <= frames {
+            let peak = values
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert!((peak - 20.0 * 0.25f64.log10()).abs() < 0.02);
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+    assert!(
+        !run(
+            dir.path(),
+            &["spectrogram", "with spaces.WAV", "--fft-size", "1000"]
+        )
+        .status
+        .success()
+    );
 }
 
 #[test]

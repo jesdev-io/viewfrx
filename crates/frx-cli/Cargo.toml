@@ -9,6 +9,10 @@ publish.workspace = true
 name = "frxview"
 path = "src/main.rs"
 
+[features]
+default = []
+spectrogram = ["frx-core/spectrogram"]
+
 [dependencies]
 frx-core = { path = "../frx-core" }
 frx-audio = { path = "../frx-audio" }

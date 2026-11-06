@@ -1,4 +1,5 @@
 //! Deterministic preview renderer, also used by the realtime producer.
+use crate::config::{MAX_MANUAL_GAIN, MAX_RATE, MIN_RATE};
 use anyhow::{Result, bail};
 use frx_core::decode::AudioReader;
 use std::path::Path;
@@ -17,15 +18,15 @@ pub struct Renderer {
 }
 
 pub fn validate_rate(rate: f64) -> Result<()> {
-    if !rate.is_finite() || !(0.25..=4.0).contains(&rate) {
-        bail!("rate must be between 0.25 and 4.0 (changes pitch)");
+    if !rate.is_finite() || !(MIN_RATE..=MAX_RATE).contains(&rate) {
+        bail!("rate must be between {MIN_RATE} and {MAX_RATE} (changes pitch)");
     }
     Ok(())
 }
 
 pub fn validate_gain(gain: f32) -> Result<()> {
-    if !gain.is_finite() || !(0.0..=4.0).contains(&gain) {
-        bail!("linear gain must be between 0 and 4");
+    if !gain.is_finite() || !(0.0..=MAX_MANUAL_GAIN).contains(&gain) {
+        bail!("linear gain must be between 0 and {MAX_MANUAL_GAIN}");
     }
     Ok(())
 }

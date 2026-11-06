@@ -141,3 +141,82 @@ fn command_queue_is_bounded() {
     }
     assert!(sender.try_send(Command::Stop).is_err());
 }
+
+#[test]
+fn normalization_resets_on_switch_and_rejects_stale_source_analysis() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    fixture(&a, 8192, 1)?;
+    fixture(&b, 16384, 1)?;
+    let shared = Shared::default();
+    let mut renderer = None;
+    apply(
+        Command::PlayNormalized {
+            path: a.clone(),
+            peak: 0.25,
+        },
+        &mut renderer,
+        &shared,
+        8000,
+    )?;
+    let normalized = status(&shared);
+    assert!(normalized.normalization_enabled);
+    assert!(
+        (normalized.normalization_gain * 0.25 - frx_core::levels::db_to_gain(-1.0)).abs() < 1e-6
+    );
+    apply(
+        Command::Normalize {
+            path: b.clone(),
+            peak: Some(0.01),
+        },
+        &mut renderer,
+        &shared,
+        8000,
+    )?;
+    assert_eq!(
+        status(&shared).normalization_gain,
+        normalized.normalization_gain
+    );
+    assert_eq!(status(&shared).state, "playing");
+    apply(
+        Command::Play { path: b.clone() },
+        &mut renderer,
+        &shared,
+        8000,
+    )?;
+    assert!(!status(&shared).normalization_enabled);
+    assert_eq!(status(&shared).normalization_gain, 1.0);
+    apply(
+        Command::Normalize {
+            path: a,
+            peak: Some(0.25),
+        },
+        &mut renderer,
+        &shared,
+        8000,
+    )?;
+    assert_eq!(status(&shared).normalization_gain, 1.0);
+    apply(
+        Command::Normalize {
+            path: b.clone(),
+            peak: Some(0.5),
+        },
+        &mut renderer,
+        &shared,
+        8000,
+    )?;
+    assert!(status(&shared).normalization_enabled);
+    apply(
+        Command::Normalize {
+            path: b,
+            peak: None,
+        },
+        &mut renderer,
+        &shared,
+        8000,
+    )?;
+    assert!(!status(&shared).normalization_enabled);
+    assert_eq!(status(&shared).normalization_gain, 1.0);
+    Ok(())
+}

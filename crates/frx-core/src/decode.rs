@@ -121,7 +121,7 @@ impl AudioReader {
     }
 
     pub fn seek(&mut self, seconds: f64) -> Result<()> {
-        if !seconds.is_finite() || !(0.0..=1e9).contains(&seconds) {
+        if !seconds.is_finite() || !(0.0..=crate::config::MAX_SEEK_SECONDS).contains(&seconds) {
             bail!("seek must be finite and between 0 and 1e9 seconds");
         }
         let seconds = self

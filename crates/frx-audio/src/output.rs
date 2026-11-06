@@ -1,6 +1,7 @@
-use crate::{Frame, Shared};
+use crate::{Frame, Shared, config::PREFERRED_DEVICE_BUFFER};
 use anyhow::{Result, bail};
 use cpal::{FromSample, SizedSample, traits::DeviceTrait};
+use frx_core::levels::StereoMeter;
 use std::sync::{Arc, atomic::Ordering};
 
 pub(crate) fn build_stream(
@@ -32,12 +33,13 @@ fn build<T: SizedSample + FromSample<f32>>(
 ) -> Result<cpal::Stream> {
     let channels = config.channels() as usize;
     let error_shared = shared.clone();
+    let mut meter = StereoMeter::new(config.sample_rate().0);
     let mut stream_config = config.config();
     stream_config.buffer_size = preferred_buffer_size(config.buffer_size());
     Ok(device.build_output_stream(
         &stream_config,
         move |data: &mut [T], _| {
-            fill(data, channels, &mut consumer, &shared);
+            fill_metered(data, channels, &mut consumer, &shared, &mut meter);
         },
         move |_| {
             error_shared.device_error.store(true, Ordering::Release);
@@ -49,18 +51,19 @@ fn build<T: SizedSample + FromSample<f32>>(
 fn preferred_buffer_size(supported: &cpal::SupportedBufferSize) -> cpal::BufferSize {
     match *supported {
         cpal::SupportedBufferSize::Range { min, max } => {
-            cpal::BufferSize::Fixed(256u32.clamp(min, max))
+            cpal::BufferSize::Fixed(PREFERRED_DEVICE_BUFFER.clamp(min, max))
         }
         cpal::SupportedBufferSize::Unknown => cpal::BufferSize::Default,
     }
 }
 
 /// Callback kernel: bounded ring consumption, arithmetic, and atomics only.
-fn fill<T: SizedSample + FromSample<f32>>(
+fn fill_metered<T: SizedSample + FromSample<f32>>(
     data: &mut [T],
     channels: usize,
     consumer: &mut rtrb::Consumer<Frame>,
     shared: &Shared,
+    meter: &mut StereoMeter,
 ) {
     let generation = shared.generation.load(Ordering::Acquire);
     // At most the fixed ring capacity can be stale. Also drain while paused or
@@ -77,6 +80,7 @@ fn fill<T: SizedSample + FromSample<f32>>(
     }
     let playing = shared.active.load(Ordering::Acquire) && !shared.paused.load(Ordering::Acquire);
     let gain = f32::from_bits(shared.gain.load(Ordering::Relaxed));
+    let normalize = f32::from_bits(shared.normalization_gain.load(Ordering::Relaxed));
     let mut peak = 0f32;
     let mut shortage = false;
     let mut clipped = 0;
@@ -100,18 +104,32 @@ fn fill<T: SizedSample + FromSample<f32>>(
             }
             [0.0; 2]
         };
+        let mut measured = [0.0; 2];
         for (channel, sample) in output.iter_mut().enumerate() {
             let value = if channels == 1 {
                 (samples[0] + samples[1]) * 0.5
             } else {
                 samples.get(channel).copied().unwrap_or(0.0)
-            } * gain;
+            } * normalize
+                * gain;
             peak = peak.max(value.abs());
             if value.abs() > 1.0 {
                 clipped += 1;
             }
-            *sample = T::from_sample(value.clamp(-1.0, 1.0));
+            let actual = value.clamp(-1.0, 1.0);
+            *sample = T::from_sample(actual);
+            if channel < measured.len() {
+                measured[channel] = actual;
+            }
         }
+        if channels == 1 {
+            measured[1] = measured[0];
+        }
+        meter.push(measured);
+    }
+    for i in 0..2 {
+        shared.rms[i].store(meter.rms()[i].to_bits(), Ordering::Relaxed);
+        shared.channel_peak[i].store(meter.peaks()[i].to_bits(), Ordering::Relaxed);
     }
     shared.peak.store(peak.to_bits(), Ordering::Relaxed);
     if shortage {
@@ -126,6 +144,42 @@ fn fill<T: SizedSample + FromSample<f32>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    const TEST_RATE: u32 = 48000;
+    fn fill<T: SizedSample + FromSample<f32>>(
+        data: &mut [T],
+        channels: usize,
+        consumer: &mut rtrb::Consumer<Frame>,
+        shared: &Shared,
+    ) {
+        fill_metered(
+            data,
+            channels,
+            consumer,
+            shared,
+            &mut StereoMeter::new(TEST_RATE),
+        );
+    }
+
+    #[test]
+    fn normalization_is_post_buffer_and_stereo_meter_reads_actual_output() {
+        let shared = Shared::default();
+        shared.active.store(true, Ordering::Release);
+        crate::set_normalization(&shared, Some(0.5)).unwrap();
+        let (mut producer, mut consumer) = rtrb::RingBuffer::new(2);
+        producer
+            .push(Frame {
+                samples: [0.5, 0.25],
+                position: 0.0,
+                generation: 0,
+            })
+            .unwrap();
+        let mut output = [0f32; 2];
+        fill(&mut output, 2, &mut consumer, &shared);
+        let status = crate::status(&shared);
+        assert!((status.peak_dbfs[0].unwrap() + 1.0).abs() < 1e-5);
+        assert!((status.peak_dbfs[1].unwrap() + 7.0206).abs() < 1e-4);
+        assert!((output[0] / output[1] - 2.0).abs() < 1e-5);
+    }
     #[test]
     fn buffer_request_is_small_but_respects_device_limits() {
         use cpal::{BufferSize, SupportedBufferSize};

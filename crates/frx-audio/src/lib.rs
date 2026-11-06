@@ -1,4 +1,5 @@
 //! Typed, frontend-independent transport and CPAL device adapter.
+pub mod config;
 mod output;
 pub mod render;
 #[cfg(test)]
@@ -19,16 +20,38 @@ use std::{
     time::Duration,
 };
 
-const RING_FRAMES: usize = 8192;
-const COMMAND_CAPACITY: usize = 32;
+use config::*;
+use frx_core::{
+    config::MAX_SEEK_SECONDS,
+    levels::{Normalization, amplitude_dbfs},
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
-    Play { path: PathBuf },
-    Seek { seconds: f64 },
-    Rate { value: f64 },
-    Gain { value: f32 },
+    Play {
+        path: PathBuf,
+    },
+    /// Atomic start with a linked-channel sample peak supplied by shared analysis.
+    PlayNormalized {
+        path: PathBuf,
+        peak: f32,
+    },
+    /// Apply/clear normalization only if this path is still loaded. Stale analysis
+    /// results are ignored. None restores the unnormalized source.
+    Normalize {
+        path: PathBuf,
+        peak: Option<f32>,
+    },
+    Seek {
+        seconds: f64,
+    },
+    Rate {
+        value: f64,
+    },
+    Gain {
+        value: f32,
+    },
     Pause,
     Resume,
     Stop,
@@ -40,6 +63,11 @@ pub struct Status {
     pub path: Option<PathBuf>,
     pub position_seconds: f64,
     pub gain: f32,
+    pub gain_db: Option<f32>,
+    pub normalization_gain: f32,
+    pub normalization_enabled: bool,
+    pub rms_dbfs: [Option<f32>; 2],
+    pub peak_dbfs: [Option<f32>; 2],
     pub rate: f64,
     pub peak: f32,
     pub underrun_callbacks: u64,
@@ -62,6 +90,10 @@ struct Shared {
     rendered_generation: AtomicU64,
     position: AtomicU64,
     gain: AtomicU32,
+    normalization_gain: AtomicU32,
+    normalization_enabled: AtomicBool,
+    rms: [AtomicU32; 2],
+    channel_peak: [AtomicU32; 2],
     peak: AtomicU32,
     paused: AtomicBool,
     active: AtomicBool,
@@ -82,6 +114,10 @@ impl Default for Shared {
             rendered_generation: AtomicU64::new(0),
             position: AtomicU64::new(0f64.to_bits()),
             gain: AtomicU32::new(1f32.to_bits()),
+            normalization_gain: AtomicU32::new(1f32.to_bits()),
+            normalization_enabled: AtomicBool::new(false),
+            rms: std::array::from_fn(|_| AtomicU32::new(0)),
+            channel_peak: std::array::from_fn(|_| AtomicU32::new(0)),
             peak: AtomicU32::new(0),
             paused: AtomicBool::new(false),
             active: AtomicBool::new(false),
@@ -190,8 +226,14 @@ impl Engine {
                 return Ok(());
             }
             Command::Rate { value } => validate_rate(value)?,
+            Command::PlayNormalized { peak, .. }
+            | Command::Normalize {
+                peak: Some(peak), ..
+            } => {
+                Normalization::from_peak(peak)?;
+            }
             Command::Seek { seconds }
-                if !seconds.is_finite() || !(0.0..=1e9).contains(&seconds) =>
+                if !seconds.is_finite() || !(0.0..=MAX_SEEK_SECONDS).contains(&seconds) =>
             {
                 bail!("seek must be finite and between 0 and 1e9 seconds")
             }
@@ -241,6 +283,17 @@ fn status(shared: &Shared) -> Status {
         path: detail.path.clone(),
         position_seconds: f64::from_bits(shared.position.load(Ordering::Acquire)),
         gain: f32::from_bits(shared.gain.load(Ordering::Relaxed)),
+        gain_db: amplitude_dbfs(f32::from_bits(shared.gain.load(Ordering::Relaxed))),
+        normalization_gain: f32::from_bits(shared.normalization_gain.load(Ordering::Relaxed)),
+        normalization_enabled: shared.normalization_enabled.load(Ordering::Relaxed),
+        rms_dbfs: std::array::from_fn(|i| {
+            amplitude_dbfs(f32::from_bits(shared.rms[i].load(Ordering::Relaxed)))
+        }),
+        peak_dbfs: std::array::from_fn(|i| {
+            amplitude_dbfs(f32::from_bits(
+                shared.channel_peak[i].load(Ordering::Relaxed),
+            ))
+        }),
         rate: detail.rate,
         peak: f32::from_bits(shared.peak.load(Ordering::Relaxed)),
         underrun_callbacks: shared.underruns.load(Ordering::Relaxed),
@@ -265,21 +318,15 @@ fn apply(
     sample_rate: u32,
 ) -> Result<()> {
     match command {
-        Command::Play { path } => {
-            invalidate(shared);
-            *renderer = None;
-            shared.loading.store(true, Ordering::Release);
-            shared.position.store(0f64.to_bits(), Ordering::Release);
-            let rate = {
-                let mut detail = shared.detail.lock().unwrap();
-                detail.path = Some(path.clone());
-                detail.error = None;
-                detail.rate
-            };
-            *renderer = Some(Renderer::open(&path, sample_rate, rate)?);
-            // Preserve pause across selection changes. Otherwise a queued play
-            // could undo a newer, immediate pause request.
-            shared.active.store(true, Ordering::Release);
+        Command::Play { path } => load(path, None, renderer, shared, sample_rate)?,
+        Command::PlayNormalized { path, peak } => {
+            load(path, Some(peak), renderer, shared, sample_rate)?
+        }
+        Command::Normalize { path, peak } => {
+            if shared.detail.lock().unwrap().path.as_ref() != Some(&path) {
+                return Ok(());
+            }
+            set_normalization(shared, peak)?;
         }
         Command::Seek { seconds } => {
             let renderer = renderer.as_mut().context("no file loaded")?;
@@ -302,6 +349,7 @@ fn apply(
         Command::Stop => {
             invalidate(shared);
             *renderer = None;
+            set_normalization(shared, None)?;
             shared.position.store(0f64.to_bits(), Ordering::Release);
             shared.peak.store(0, Ordering::Relaxed);
             let mut detail = shared.detail.lock().unwrap();
@@ -312,6 +360,44 @@ fn apply(
     }
     shared.loading.store(false, Ordering::Release);
     shared.detail.lock().unwrap().error = None;
+    Ok(())
+}
+
+fn set_normalization(shared: &Shared, peak: Option<f32>) -> Result<()> {
+    let gain = peak
+        .map(Normalization::from_peak)
+        .transpose()?
+        .map_or(1.0, |n| n.gain);
+    shared
+        .normalization_gain
+        .store(gain.to_bits(), Ordering::Relaxed);
+    shared
+        .normalization_enabled
+        .store(peak.is_some(), Ordering::Relaxed);
+    Ok(())
+}
+
+fn load(
+    path: PathBuf,
+    peak: Option<f32>,
+    renderer: &mut Option<Renderer>,
+    shared: &Shared,
+    sample_rate: u32,
+) -> Result<()> {
+    invalidate(shared);
+    *renderer = None;
+    shared.loading.store(true, Ordering::Release);
+    shared.position.store(0f64.to_bits(), Ordering::Release);
+    set_normalization(shared, peak)?;
+    let rate = {
+        let mut detail = shared.detail.lock().unwrap();
+        detail.path = Some(path.clone());
+        detail.error = None;
+        detail.rate
+    };
+    *renderer = Some(Renderer::open(&path, sample_rate, rate)?);
+    // Preserve the latest immediate pause request across a queued load.
+    shared.active.store(true, Ordering::Release);
     Ok(())
 }
 
@@ -349,7 +435,7 @@ fn worker(
         if let Some(current) = renderer.as_mut() {
             let generation = shared.generation.load(Ordering::Acquire);
             // Limit producer work per pass so queued controls get serviced often.
-            for _ in 0..producer.slots().min(256) {
+            for _ in 0..producer.slots().min(DECODE_BATCH_FRAMES) {
                 match current.next_frame() {
                     Ok(Some(samples)) => {
                         let _ = producer.push(Frame {
@@ -370,7 +456,7 @@ fn worker(
             }
         }
         if renderer.is_none() || producer.slots() == 0 || shared.done.load(Ordering::Acquire) {
-            thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_millis(WORKER_POLL_MS));
         }
     }
 }

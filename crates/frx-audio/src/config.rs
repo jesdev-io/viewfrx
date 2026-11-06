@@ -1,0 +1,9 @@
+//! Transport and realtime scheduling policy.
+pub const RING_FRAMES: usize = 8192;
+pub const COMMAND_CAPACITY: usize = 32;
+pub const PREFERRED_DEVICE_BUFFER: u32 = 256;
+pub const DECODE_BATCH_FRAMES: usize = 256;
+pub const WORKER_POLL_MS: u64 = 1;
+pub const MIN_RATE: f64 = 0.25;
+pub const MAX_RATE: f64 = 4.0;
+pub const MAX_MANUAL_GAIN: f32 = 4.0;

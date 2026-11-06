@@ -1,11 +1,14 @@
+mod config;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use config::*;
 use frx_audio::{Command, Engine};
 use frx_core::{
     catalog::{Catalog, discover_ordered},
     decode::inspect,
     waveform::WaveformCache,
 };
+use frx_core::{config::DEFAULT_WAVEFORM_BINS, levels::db_to_gain};
 use serde::Serialize;
 use serde_json::json;
 use std::{
@@ -49,9 +52,24 @@ enum Action {
     /// Produce a bounded min/max overview, with an on-disk cache.
     Waveform {
         path: PathBuf,
-        #[arg(long, default_value_t = 4096)]
+        #[arg(long, default_value_t = DEFAULT_WAVEFORM_BINS)]
         bins: usize,
-        #[arg(long, default_value = ".frxview/waveforms")]
+        #[arg(long, default_value = WAVEFORM_CACHE)]
+        cache: PathBuf,
+    },
+    /// Calculate linked-channel peak normalization to -1 dBFS without changing audio.
+    Normalization {
+        path: PathBuf,
+        #[arg(long, default_value = WAVEFORM_CACHE)]
+        cache: PathBuf,
+    },
+    /// Streaming, bounded, cached STFT overview in amplitude dBFS.
+    #[cfg(feature = "spectrogram")]
+    Spectrogram {
+        path: PathBuf,
+        #[arg(long, default_value_t = frx_core::config::spectral::DEFAULT_FFT_SIZE)]
+        fft_size: usize,
+        #[arg(long, default_value = SPECTROGRAM_CACHE)]
         cache: PathBuf,
     },
     /// List current output devices (indices are session-local, not persistent IDs).
@@ -63,6 +81,14 @@ enum Action {
         device: Option<usize>,
         #[arg(long, default_value_t = 1.0)]
         gain: f32,
+        /// Relative gain in dB (not dBFS); alternative to --gain.
+        #[arg(long, allow_hyphen_values = true, conflicts_with = "gain")]
+        gain_db: Option<f32>,
+        /// Linked-channel sample-peak normalization to -1 dBFS, before manual gain.
+        #[arg(long)]
+        normalize: bool,
+        #[arg(long, default_value = WAVEFORM_CACHE)]
+        cache: PathBuf,
         #[arg(long, default_value_t = 1.0)]
         rate: f64,
         #[arg(long)]
@@ -76,7 +102,7 @@ enum Action {
     /// Decode/resample without a device; report throughput and signal checksums.
     Benchmark {
         path: PathBuf,
-        #[arg(long, default_value_t = 48000)]
+        #[arg(long, default_value_t = BENCHMARK_SAMPLE_RATE)]
         sample_rate: u32,
         #[arg(long, default_value_t = 1.0)]
         rate: f64,
@@ -140,24 +166,53 @@ fn run() -> Result<()> {
         Action::Waveform { path, bins, cache } => {
             emit(&WaveformCache::new(cache).get(&path, bins)?)?
         }
+        Action::Normalization { path, cache } => emit(
+            &WaveformCache::new(cache)
+                .get(&path, DEFAULT_WAVEFORM_BINS)?
+                .waveform
+                .normalization()?,
+        )?,
+        #[cfg(feature = "spectrogram")]
+        Action::Spectrogram {
+            path,
+            fft_size,
+            cache,
+        } => {
+            use frx_core::spectrogram::{Settings, SpectrogramCache};
+            emit(&SpectrogramCache::new(cache).get(&path, Settings { fft_size }, || false)?)?;
+        }
         Action::Devices => emit(&frx_audio::devices()?)?,
         Action::Play {
             path,
             device,
             gain,
+            gain_db,
+            normalize,
+            cache,
             rate,
             seconds,
         } => {
             if seconds.is_some_and(|s| !s.is_finite() || s <= 0.0) {
                 bail!("seconds must be finite and positive");
             }
+            let gain = gain_db.map_or(gain, db_to_gain);
+            frx_audio::render::validate_gain(gain)?;
+            let command = if normalize {
+                let peak = WaveformCache::new(cache)
+                    .get(&path, DEFAULT_WAVEFORM_BINS)?
+                    .waveform
+                    .sample_peak();
+                Command::PlayNormalized { path, peak }
+            } else {
+                Command::Play { path }
+            };
             let engine = Engine::open(device)?;
             engine.execute(Command::Gain { value: gain })?;
             engine.execute(Command::Rate { value: rate })?;
-            engine.execute(Command::Play { path })?;
+            engine.execute(command)?;
             let start = Instant::now();
             loop {
-                thread::sleep(Duration::from_millis(10));
+                thread::sleep(Duration::from_millis(STATUS_POLL_MS));
                 let status = engine.status();
                 if let Some(error) = status.error {
                     bail!("{error}");
@@ -207,12 +262,15 @@ fn session(engine: Engine) -> Result<()> {
     loop {
         let mut bytes = Vec::new();
         use std::io::Read;
-        let n = input.by_ref().take(65537).read_until(b'\n', &mut bytes)?;
+        let n = input
+            .by_ref()
+            .take((MAX_REQUEST_BYTES + 1) as u64)
+            .read_until(b'\n', &mut bytes)?;
         if n == 0 {
             break;
         }
-        if bytes.len() > 65536 {
-            bail!("session request exceeds 64 KiB");
+        if bytes.len() > MAX_REQUEST_BYTES {
+            bail!("session request exceeds {MAX_REQUEST_BYTES} bytes");
         }
         let result = (|| -> Result<bool> {
             let value: serde_json::Value =

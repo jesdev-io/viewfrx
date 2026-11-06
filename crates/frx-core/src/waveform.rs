@@ -1,14 +1,10 @@
-use crate::{catalog::atomic_json, decode::AudioReader};
+use crate::{catalog::atomic_json, config::*, decode::AudioReader, levels::Normalization};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
 };
-
-const VERSION: u32 = 1;
-const DEFAULT_BUDGET: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Peak {
@@ -23,6 +19,17 @@ pub struct Waveform {
     pub frames_per_bin: u64,
     /// Peaks across all channels; not an amplitude-cancelling mono mix.
     pub peaks: Vec<Peak>,
+}
+
+impl Waveform {
+    pub fn sample_peak(&self) -> f32 {
+        self.peaks.iter().fold(0.0f32, |peak, bin| {
+            peak.max(bin.min.abs()).max(bin.max.abs())
+        })
+    }
+    pub fn normalization(&self) -> Result<Normalization> {
+        Normalization::from_peak(self.sample_peak())
+    }
 }
 
 #[derive(Serialize)]
@@ -46,8 +53,8 @@ pub fn analyze_cancellable(
     if cancelled() {
         bail!("analysis cancelled");
     }
-    if !(2..=65536).contains(&max_bins) || !max_bins.is_power_of_two() {
-        bail!("bins must be a power of two between 2 and 65536");
+    if !(MIN_WAVEFORM_BINS..=MAX_WAVEFORM_BINS).contains(&max_bins) || !max_bins.is_power_of_two() {
+        bail!("bins must be a power of two between {MIN_WAVEFORM_BINS} and {MAX_WAVEFORM_BINS}");
     }
     let mut reader = AudioReader::open(path)?;
     let mut frame = vec![0.0; reader.info().channels];
@@ -63,7 +70,7 @@ pub fn analyze_cancellable(
     };
     let mut count = 0;
     while reader.next_frame(&mut frame)? {
-        if result.frames.is_multiple_of(4096) && cancelled() {
+        if result.frames.is_multiple_of(ANALYSIS_CANCEL_INTERVAL) && cancelled() {
             bail!("analysis cancelled");
         }
         for &sample in &frame {
@@ -104,9 +111,18 @@ fn read_cached(path: &Path, bins: usize) -> Option<Waveform> {
     let file = fs::File::open(path).ok()?;
     // Bound the actual read too, even if another process grows the file after stat.
     let mut bytes = Vec::new();
-    file.take(8 * 1024 * 1024).read_to_end(&mut bytes).ok()?;
+    file.take(MAX_WAVEFORM_ENTRY_BYTES)
+        .read_to_end(&mut bytes)
+        .ok()?;
     let waveform: Waveform = serde_json::from_slice(&bytes).ok()?;
-    if waveform.peaks.len() > bins || waveform.sample_rate == 0 || waveform.frames_per_bin == 0 {
+    if waveform.peaks.len() > bins
+        || waveform.sample_rate == 0
+        || waveform.frames_per_bin == 0
+        || waveform
+            .peaks
+            .iter()
+            .any(|p| !p.min.is_finite() || !p.max.is_finite() || p.min > p.max)
+    {
         return None;
     }
     Some(waveform)
@@ -121,21 +137,17 @@ impl WaveformCache {
     pub fn new(directory: PathBuf) -> Self {
         Self {
             directory,
-            budget: DEFAULT_BUDGET,
+            budget: WAVEFORM_CACHE_BYTES,
         }
     }
 
     fn key(path: &Path, bins: usize) -> Result<String> {
-        let canonical = path.canonicalize()?;
-        let meta = canonical.metadata()?;
-        let modified = meta.modified()?.duration_since(UNIX_EPOCH)?.as_nanos();
-        let mut hash = blake3::Hasher::new();
-        hash.update(canonical.as_os_str().as_encoded_bytes());
-        hash.update(&meta.len().to_le_bytes());
-        hash.update(&modified.to_le_bytes());
-        hash.update(&(bins as u64).to_le_bytes());
-        hash.update(&VERSION.to_le_bytes());
-        Ok(hash.finalize().to_hex().to_string())
+        let parameters = [
+            &(bins as u64).to_le_bytes()[..],
+            &WAVEFORM_CACHE_VERSION.to_le_bytes()[..],
+        ]
+        .concat();
+        crate::cache::key(path, &parameters)
     }
 
     pub fn get(&self, path: &Path, bins: usize) -> Result<CachedWaveform> {
@@ -175,31 +187,7 @@ impl WaveformCache {
     }
 
     fn prune(&self) -> Result<()> {
-        let mut entries = Vec::new();
-        let mut total = 0;
-        for entry in fs::read_dir(&self.directory)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let owned = name
-                .to_str()
-                .and_then(|s| s.strip_prefix("frx-waveform-"))
-                .and_then(|s| s.strip_suffix(".json"))
-                .is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()));
-            if owned && entry.file_type()?.is_file() {
-                let meta = entry.metadata()?;
-                total += meta.len();
-                entries.push((meta.modified()?, meta.len(), entry.path()));
-            }
-        }
-        entries.sort_by_key(|entry| entry.0);
-        for (_, bytes, path) in entries {
-            if total <= self.budget {
-                break;
-            }
-            fs::remove_file(path)?;
-            total -= bytes;
-        }
-        Ok(())
+        crate::cache::prune(&self.directory, "frx-waveform-", self.budget)
     }
 }
 
