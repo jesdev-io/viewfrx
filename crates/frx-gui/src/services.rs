@@ -24,6 +24,7 @@ use std::{
 };
 
 use crate::config::{controls, runtime::*};
+use crate::logln;
 use frx_core::config::DEFAULT_WAVEFORM_BINS;
 
 #[derive(Clone, Default)]
@@ -108,12 +109,16 @@ impl AudioService {
                     engine = None;
                     match Engine::open(index) {
                         Ok(new) => {
+                            logln!("audio engine opened (device {:?})", index);
                             let _ = new.execute(Command::Gain { value: gain });
                             let _ = new.execute(Command::Rate { value: rate });
                             engine = Some(new);
                             state.error = None;
                         }
-                        Err(e) => state.error = Some(format!("Audio output: {e:#}")),
+                        Err(e) => {
+                            logln!("audio output failed: {e:#}");
+                            state.error = Some(format!("Audio output: {e:#}"));
+                        }
                     }
                     state.opening = false;
                 }
@@ -293,6 +298,9 @@ impl LibraryService {
                         cancelled,
                         &ctx,
                     );
+                }
+                if let Err(e) = &result {
+                    logln!("scan error: {e:#}");
                 }
                 deliver(
                     &tx,
@@ -490,8 +498,10 @@ impl FileService {
                 let cancelled = || {
                     stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != job.id
                 };
-                let result = annotations::annotate(&job.path, &job.new)
-                    .map_err(|e| format!("{e:#}"));
+                let result = annotations::annotate(&job.path, &job.new).map_err(|e| {
+                    logln!("annotation write to {} failed: {e:#}", job.path.display());
+                    format!("{e:#}")
+                });
                 deliver(
                     &tx,
                     FileEvent::AnnotationsWritten(job.id, result),

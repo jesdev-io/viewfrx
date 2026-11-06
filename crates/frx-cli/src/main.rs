@@ -3,6 +3,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use config::*;
 use frx_audio::{Command, Engine};
+use std::sync::atomic::{AtomicBool, Ordering};
 use frx_core::{
     annotations::{self, Annotation},
     catalog::{Catalog, discover_ordered},
@@ -29,8 +30,20 @@ use std::{
 struct Args {
     #[arg(long, global = true, hide = true, default_value = ".")]
     library: PathBuf,
+    /// Pipe console log lines to stderr as JSON (headless counterpart of the
+    /// GUI debug console window).
+    #[arg(long, global = true)]
+    verbose: bool,
     #[command(subcommand)]
     command: Action,
+}
+
+static VERBOSE: AtomicBool = AtomicBool::new(false);
+/// Console logging: JSON lines on stderr when --verbose is set.
+fn vlog(message: String) {
+    if VERBOSE.load(Ordering::Relaxed) {
+        eprintln!("{}", json!({"log": message}));
+    }
 }
 
 #[derive(Subcommand)]
@@ -167,6 +180,11 @@ fn main() {
 
 fn run() -> Result<()> {
     let args = Args::parse();
+    VERBOSE.store(args.verbose, Ordering::Relaxed);
+    vlog(format!(
+        "frxview invoked: {}",
+        std::env::args().skip(1).collect::<Vec<_>>().join(" ")
+    ));
     let temporary_cache = tempfile::tempdir()?;
     let cache_path = |path: PathBuf| {
         if path == PathBuf::from(WAVEFORM_CACHE) {
@@ -405,6 +423,7 @@ fn session(engine: Engine) -> Result<()> {
                         value.get("path").cloned().context("annotations needs a path")?,
                     )?;
                     let stored = annotations::read(&path)?;
+                    vlog(format!("annotations {}: {} marker(s)", path.display(), stored.len()));
                     emit(&json!({"ok":true, "path": path, "annotations": annotations::to_json(&stored)}))?;
                 }
                 Some("annotate") => {
@@ -431,9 +450,11 @@ fn session(engine: Engine) -> Result<()> {
                         annotations::parse_text(text)?
                     };
                     let stored = annotations::annotate(&path, &new)?;
+                    vlog(format!("annotated {}: {} marker(s)", path.display(), stored.len()));
                     emit(&json!({"ok":true, "path": path, "annotations": annotations::to_json(&stored)}))?;
                 }
                 _ => {
+                    vlog(format!("session op: {value}"));
                     engine.execute(serde_json::from_value(value)?)?;
                     emit(&json!({"ok":true,"ack":"accepted"}))?;
                 }

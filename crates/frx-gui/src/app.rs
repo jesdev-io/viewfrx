@@ -10,7 +10,7 @@ mod tests;
 use crate::widgets::waveform_view;
 use crate::{
     Args,
-    config::{controls as c, runtime as r},
+    config::{controls as c, layout as l, runtime as r},
     model::{Browser, seek_at},
     services::{
         AnalysisEvent, AnalysisOptions, AnalysisService, AudioRequest, AudioService, AudioSnapshot,
@@ -18,7 +18,7 @@ use crate::{
     },
     theme,
 };
-use eframe::egui;
+use eframe::egui::{self, RichText};
 #[cfg(test)]
 use eframe::egui::{pos2, vec2};
 use frx_audio::Command;
@@ -44,6 +44,7 @@ pub struct App {
     annotations: Vec<Annotation>,
     annotation_text: String,
     highpass: bool,
+    debug_console: bool,
     browser: Browser,
     scan_id: u64,
     analysis_id: u64,
@@ -105,7 +106,8 @@ impl App {
             file_id: 0,
             annotations: Vec::new(),
             annotation_text: String::new(),
-            highpass: false,
+            highpass: c::HIGHPASS_DEFAULT,
+            debug_console: args.debug_console,
             library,
             browser: Browser::default(),
             scan_id,
@@ -159,7 +161,9 @@ impl App {
         }
     }
     fn send(&mut self, command: Command) {
+        crate::logln!("transport: {command:?}");
         if let Err(error) = self.audio.send(AudioRequest::Transport(command)) {
+            crate::logln!("transport rejected: {error}");
             self.error = Some(error);
         }
     }
@@ -277,6 +281,7 @@ impl App {
         }
     }
     fn select(&mut self, path: PathBuf, audition: bool) {
+        crate::logln!("select {} (audition={audition})", path.display());
         self.request_analysis(path.clone());
         self.browser.selected = Some(path);
         self.info = None;
@@ -300,6 +305,7 @@ impl App {
         }
     }
     fn rescan(&mut self, paths: Vec<PathBuf>) {
+        crate::logln!("rescan with {} new path(s)", paths.len());
         self.pending_play = false;
         self.pending_seek = None;
         self.scan_id = self.library.request(paths, self.recursive);
@@ -328,6 +334,11 @@ impl App {
                 }
                 ScanEvent::Done(id, error) if id == self.scan_id => {
                     self.scanning = false;
+                    if let Some(error) = &error {
+                        crate::logln!("scan finished with error: {error}");
+                    } else {
+                        crate::logln!("scan finished: {} candidates", self.browser.entries.len());
+                    }
                     if error.is_some() {
                         self.error = error;
                     }
@@ -403,10 +414,14 @@ impl App {
             }
             match result {
                 Ok(list) => {
+                    crate::logln!("annotations written: {} marker(s)", list.len());
                     self.annotations = list;
                     self.annotation_text = annotations::format_annotations(&self.annotations);
                 }
-                Err(error) => self.error = Some(error),
+                Err(error) => {
+                    crate::logln!("annotation write failed: {error}");
+                    self.error = Some(error);
+                }
             }
         }
         self.finish_pending_play();
@@ -686,6 +701,19 @@ impl eframe::App for App {
         self.browser_panel(ctx);
         self.settings(ctx);
         self.center(ctx);
+        if self.debug_console {
+            egui::Window::new("Debug console")
+                .default_size(l::DEBUG_WINDOW_SIZE)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            for line in crate::logbuf::lines() {
+                                ui.monospace(RichText::new(line).size(l::MICRO_FONT));
+                            }
+                        });
+                });
+        }
         self.diagnostic(ctx);
         self.frame_count += 1;
         self.max_update_ms = self

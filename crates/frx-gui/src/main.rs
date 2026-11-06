@@ -1,7 +1,9 @@
 mod app;
 mod config;
+mod logbuf;
 mod model;
 mod services;
+pub(crate) use logbuf::logln;
 #[cfg(feature = "spectrogram")]
 mod spectral;
 mod theme;
@@ -34,6 +36,9 @@ pub struct Args {
     /// Start with gain zero, useful for safe automated visual checks.
     #[arg(long)]
     muted: bool,
+    /// Pipe console log lines to the debug window (in-app console).
+    #[arg(long)]
+    debug_console: bool,
     /// Diagnostic: close after this many seconds (no automatic audible playback).
     #[arg(long)]
     smoke_seconds: Option<f64>,
@@ -69,6 +74,7 @@ fn main() -> eframe::Result {
             }),
         ..Default::default()
     };
+    logbuf::push(format!("frxview-gui starting, args: {:?}", std::env::args().skip(1).collect::<Vec<_>>()));
     let result = eframe::run_native(
         "frxview",
         options,

@@ -7,6 +7,7 @@ fn test_app(ctx: &egui::Context, directory: &std::path::Path) -> (App, Receiver<
         library: directory.join("library.json"),
         cache: directory.join("cache"),
         muted: true,
+        debug_console: false,
         smoke_seconds: None,
         screenshot: None,
     };

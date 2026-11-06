@@ -416,6 +416,22 @@ impl App {
         }
         #[cfg(not(feature = "spectrogram"))]
         ui.small("Spectrogram requires a build with --features spectrogram.");
+        ui.separator();
+        ui.label("DEBUG");
+        if widgets::reset_toggle(
+            ui,
+            &mut self.debug_console,
+            c::DEBUG_CONSOLE_DEFAULT,
+            "Debug console window",
+        )
+        .changed()
+        {
+            crate::logln!("debug console {}", if self.debug_console { "opened" } else { "closed" });
+        }
+        ui.small(
+            RichText::new("Pipes console messages into a debug window.")
+                .color(theme::MUTED),
+        );
     }
     pub(super) fn center(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()

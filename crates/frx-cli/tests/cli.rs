@@ -310,3 +310,21 @@ fn bad_files_and_invalid_arguments_fail_without_panics() {
         assert!(!error["error"].as_str().unwrap().is_empty());
     }
 }
+
+#[test]
+fn verbose_flag_pipes_console_log_lines_to_stderr() {
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let output = run(dir.path(), &["--verbose", "inspect", "with spaces.WAV"]);
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let logs: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.contains("\"log\""))
+        .collect();
+    assert!(!logs.is_empty(), "stderr: {stderr}");
+    // Without --verbose, stderr stays clean on success.
+    let quiet = run(dir.path(), &["inspect", "with spaces.WAV"]);
+    assert!(quiet.status.success());
+    assert!(quiet.stderr.is_empty());
+}

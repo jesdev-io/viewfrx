@@ -14,6 +14,7 @@ pub mod runtime {
     pub const SMOKE_MIN_SECONDS: f64 = 1.0;
     pub const SMOKE_MAX_SECONDS: f64 = 120.0;
     pub const CAPTURE_TIMEOUT_SECONDS: f64 = 10.0;
+    pub const LOG_CAPACITY: usize = 2_000;
 }
 pub mod controls {
     pub const GAIN_MIN_DB: f64 = -60.0;
@@ -23,6 +24,8 @@ pub mod controls {
     pub const AUTOPLAY_DEFAULT: bool = true;
     pub const RECURSIVE_DEFAULT: bool = true;
     pub const NORMALIZE_DEFAULT: bool = false;
+    pub const HIGHPASS_DEFAULT: bool = false;
+    pub const DEBUG_CONSOLE_DEFAULT: bool = false;
     pub const SCROLL_CONTEXT_ROWS: usize = 3;
     pub const SLIDER_DECIMALS: usize = 2;
     pub const DB_FLOOR: f32 = -60.0;
@@ -93,4 +96,5 @@ pub mod layout {
     pub const VALUE_MIN_WIDTH: f32 = 62.0;
     pub const ITEM_SPACING: [f32; 2] = [10.0, 8.0];
     pub const BUTTON_PADDING: [f32; 2] = [12.0, 7.0];
+    pub const DEBUG_WINDOW_SIZE: [f32; 2] = [560.0, 260.0];
 }
