@@ -1,3 +1,4 @@
+use crate::config::layout as l;
 use eframe::egui::{self, Color32};
 pub const BG: Color32 = Color32::from_rgb(15, 16, 20);
 pub const PANEL: Color32 = Color32::from_rgb(24, 26, 33);
@@ -5,6 +6,19 @@ pub const RAISED: Color32 = Color32::from_rgb(34, 38, 49);
 pub const AMBER: Color32 = Color32::from_rgb(255, 179, 0);
 pub const MUTED: Color32 = Color32::from_rgb(184, 190, 200);
 pub const PURPLE: Color32 = Color32::from_rgb(161, 112, 217);
+pub const NORMALIZED_WAVE: Color32 = Color32::from_rgb(70, 78, 105);
+pub const METER_GREEN: Color32 = Color32::from_rgb(70, 185, 136);
+pub const ALERT: Color32 = Color32::from_rgb(255, 132, 113);
+pub const TEXT: Color32 = Color32::from_rgb(237, 241, 245);
+pub const SELECTED: Color32 = Color32::from_rgb(96, 68, 12);
+#[cfg(feature = "spectrogram")]
+pub const SPECTRAL_PALETTE: [Color32; 5] = [
+    Color32::from_rgb(12, 12, 20),
+    Color32::from_rgb(65, 22, 91),
+    Color32::from_rgb(153, 40, 94),
+    Color32::from_rgb(241, 115, 35),
+    Color32::from_rgb(255, 244, 169),
+];
 
 pub fn apply(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::dark();
@@ -12,16 +26,16 @@ pub fn apply(ctx: &egui::Context) {
     visuals.window_fill = PANEL;
     visuals.extreme_bg_color = BG;
     visuals.faint_bg_color = RAISED;
-    visuals.override_text_color = Some(Color32::from_rgb(237, 241, 245));
-    visuals.selection.bg_fill = Color32::from_rgb(96, 68, 12);
-    visuals.selection.stroke = egui::Stroke::new(1.0, AMBER);
-    visuals.widgets.active.bg_fill = Color32::from_rgb(96, 68, 12);
+    visuals.override_text_color = Some(TEXT);
+    visuals.selection.bg_fill = SELECTED;
+    visuals.selection.stroke = egui::Stroke::new(l::THIN_STROKE, AMBER);
+    visuals.widgets.active.bg_fill = SELECTED;
     visuals.widgets.hovered.bg_fill = RAISED;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, AMBER);
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(l::THIN_STROKE, AMBER);
     ctx.set_visuals(visuals);
     let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.spacing.button_padding = egui::vec2(12.0, 7.0);
+    style.spacing.item_spacing = l::ITEM_SPACING.into();
+    style.spacing.button_padding = l::BUTTON_PADDING.into();
     ctx.set_style(style);
 }
 

@@ -33,6 +33,7 @@ def fixture(path, seconds):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio", action="store_true")
+    parser.add_argument("--spectrogram", action="store_true", help="Benchmark the optional spectrogram feature")
     parser.add_argument("--device", type=int)
     parser.add_argument("--binary", type=Path, default=ROOT / "target/release/frxview")
     args = parser.parse_args()
@@ -62,6 +63,16 @@ def main():
             report[f"waveform_{label}"] = {"ms": (time.perf_counter() - start) * 1000,
                                            "cache_hit": data["cache_hit"], "bins": len(data["waveform"]["peaks"])}
             assert data["cache_hit"] == (label == "warm")
+        if args.spectrogram:
+            for label in ["cold", "warm"]:
+                start = time.perf_counter()
+                data = run("spectrogram", long, "--cache", tmp / "spectral-cache")
+                spectral = data["spectrogram"]
+                report[f"spectrogram_{label}"] = {"ms": (time.perf_counter() - start) * 1000,
+                    "cache_hit": data["cache_hit"], "columns": spectral["columns"], "frequency_bins": spectral["frequency_bins"]}
+                assert data["cache_hit"] == (label == "warm")
+                assert len(spectral["dbfs"]) == spectral["columns"] * spectral["frequency_bins"]
+                assert all(math.isfinite(v) for v in spectral["dbfs"])
         listing = tmp / "listing"
         listing.mkdir()
         for i in range(10000):
@@ -136,6 +147,18 @@ def main():
                     request("resume")
                     wait(lambda s: s["rate"] == 2)
                     assert request("rate", value=0)["ok"] is False
+                    normalization = run("normalization", short, "--cache", tmp / "cache")
+                    request("normalize", path=str(short), peak=normalization["source_peak"])
+                    normalized = wait(lambda s: s["normalization_enabled"])
+                    assert abs(normalized["normalization_gain"] - normalization["gain"]) < 1e-5
+                    assert normalized["gain"] == 0, "normalization must not override mute"
+                    assert normalized["rms_dbfs"] == [None, None]
+                    generation = normalized["generation"]
+                    request("play_normalized", path=str(short), peak=normalization["source_peak"])
+                    wait(lambda s: s["rendered_generation"] > generation and s["normalization_enabled"])
+                    request("normalize", path=str(short), peak=None)
+                    wait(lambda s: not s["normalization_enabled"])
+                    report["normalization"] = normalization
                     if (tmp / "60s.mp3").exists():
                         previous = request("status")["generation"]
                         request("play", path=str(tmp / "60s.mp3"))

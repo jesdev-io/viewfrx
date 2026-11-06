@@ -49,6 +49,120 @@ fn keyboard_and_seek_use_the_same_transport_commands_as_cli() {
 }
 
 #[test]
+fn normalized_start_uses_the_same_peak_as_the_ghost_waveform() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, rx) = test_app(&ctx, dir.path());
+    let path = dir.path().join("a.wav");
+    app.browser.selected = Some(path.clone());
+    app.normalize = true;
+    app.waveform = Some(Waveform {
+        sample_rate: 48000,
+        frames: 1,
+        frames_per_bin: 1,
+        peaks: vec![frx_core::waveform::Peak {
+            min: -0.25,
+            max: 0.1,
+        }],
+    });
+    let preview = app.waveform.as_ref().unwrap().normalization().unwrap();
+    app.start_selected();
+    match rx.try_recv().unwrap() {
+        AudioRequest::Transport(Command::PlayNormalized { path: actual, peak }) => {
+            assert_eq!(actual, path);
+            assert_eq!(peak, preview.source_peak);
+            assert!(
+                (frx_core::levels::amplitude_dbfs(peak * preview.gain).unwrap() + 1.0).abs() < 1e-5
+            );
+        }
+        _ => panic!("expected atomic normalized playback, not ordinary play followed by gain"),
+    }
+}
+
+fn peak_fixture() -> Waveform {
+    Waveform {
+        sample_rate: 48000,
+        frames: 48000,
+        frames_per_bin: 48000,
+        peaks: vec![frx_core::waveform::Peak {
+            min: -0.25,
+            max: 0.1,
+        }],
+    }
+}
+
+#[test]
+fn normalized_playback_waits_for_analysis_and_preserves_seek() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, rx) = test_app(&ctx, dir.path());
+    app.browser.selected = Some(dir.path().join("a.wav"));
+    app.normalize = true;
+    assert!(!app.start_selected());
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        AudioRequest::Transport(Command::Stop)
+    ));
+    app.seek(0.25);
+    app.finish_pending_play();
+    assert!(rx.try_recv().is_err());
+    app.waveform = Some(peak_fixture());
+    app.finish_pending_play();
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        AudioRequest::Transport(Command::PlayNormalized { peak: 0.25, .. })
+    ));
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        AudioRequest::Transport(Command::Seek { seconds: 0.25 })
+    ));
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        AudioRequest::Transport(Command::Resume)
+    ));
+    assert!(!app.pending_play);
+}
+
+#[test]
+fn pending_play_respects_stop_selection_changes_and_disabling_normalization() {
+    for action in ["stop", "select", "disable"] {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = egui::Context::default();
+        let (mut app, rx) = test_app(&ctx, dir.path());
+        app.browser.selected = Some(dir.path().join("a.wav"));
+        app.normalize = true;
+        app.start_selected();
+        rx.try_recv().unwrap();
+        match action {
+            "stop" => {
+                app.stop();
+                assert!(matches!(
+                    rx.try_recv().unwrap(),
+                    AudioRequest::Transport(Command::Stop)
+                ));
+            }
+            "select" => app.select(dir.path().join("b.wav"), false),
+            _ => {
+                app.normalize = false;
+                app.normalization_changed();
+                assert!(matches!(
+                    rx.try_recv().unwrap(),
+                    AudioRequest::Transport(Command::Play { .. })
+                ));
+                assert!(matches!(
+                    rx.try_recv().unwrap(),
+                    AudioRequest::Transport(Command::Resume)
+                ));
+            }
+        }
+        app.waveform = Some(peak_fixture());
+        app.finish_pending_play();
+        assert!(!app.pending_play);
+        assert!(rx.try_recv().is_err(), "{action}");
+    }
+}
+
+#[test]
 fn empty_and_populated_views_render_without_an_audio_device() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = egui::Context::default();

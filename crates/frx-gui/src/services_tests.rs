@@ -65,3 +65,46 @@ fn full_result_queue_can_be_cancelled_without_a_consumer() {
     tx.send(1).unwrap();
     assert!(!deliver(&tx, 2, || true, &egui::Context::default()));
 }
+
+#[cfg(feature = "spectrogram")]
+#[test]
+fn spectral_worker_delivers_color_image_after_waveform() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tone.mp3");
+    std::fs::write(
+        &path,
+        include_bytes!("../../frx-core/tests/fixtures/tone.mp3"),
+    )
+    .unwrap();
+    let service = AnalysisService::start(egui::Context::default(), dir.path().join("cache"));
+    let id = service.request_with_options(
+        path,
+        AnalysisOptions {
+            spectral: Some(crate::spectral::RenderSettings {
+                analysis: frx_core::spectrogram::Settings::default(),
+                floor_db: -100.0,
+            }),
+        },
+    );
+    let mut waveform = false;
+    loop {
+        match service.rx.recv_timeout(Duration::from_secs(3)).unwrap() {
+            AnalysisEvent::Waveform(generation, result) if generation == id => {
+                result.unwrap();
+                waveform = true;
+            }
+            AnalysisEvent::Spectrogram(generation, result) if generation == id => {
+                assert!(waveform);
+                let image = result.unwrap().unwrap();
+                assert!(image.image.width() > 0);
+                assert_eq!(
+                    image.image.height(),
+                    frx_core::config::spectral::MAX_FREQUENCY_BINS
+                );
+                assert_eq!(image.nyquist_hz, 22050.0);
+                break;
+            }
+            _ => {}
+        }
+    }
+}

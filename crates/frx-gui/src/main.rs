@@ -1,7 +1,11 @@
 mod app;
+mod config;
 mod model;
 mod services;
+#[cfg(feature = "spectrogram")]
+mod spectral;
 mod theme;
+mod widgets;
 
 use clap::Parser;
 use eframe::egui;
@@ -38,10 +42,11 @@ pub struct Args {
 
 fn main() -> eframe::Result {
     let args = Args::parse();
-    if args
-        .smoke_seconds
-        .is_some_and(|s| !s.is_finite() || !(1.0..=120.0).contains(&s))
-    {
+    if args.smoke_seconds.is_some_and(|s| {
+        !s.is_finite()
+            || !(config::runtime::SMOKE_MIN_SECONDS..=config::runtime::SMOKE_MAX_SECONDS)
+                .contains(&s)
+    }) {
         eprintln!("--smoke-seconds must be between 1 and 120");
         std::process::exit(2);
     }
@@ -49,8 +54,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("frxview · JESDEV")
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([900.0, 560.0])
+            .with_inner_size(config::layout::WINDOW_SIZE)
+            .with_min_inner_size(config::layout::WINDOW_MIN)
             .with_icon(egui::IconData {
                 width: icon.width(),
                 height: icon.height(),

@@ -22,7 +22,8 @@ use std::{
     time::Duration,
 };
 
-const MAX_FILES: usize = 100_000;
+use crate::config::{controls, runtime::*};
+use frx_core::config::DEFAULT_WAVEFORM_BINS;
 
 #[derive(Clone, Default)]
 pub struct AudioSnapshot {
@@ -44,7 +45,7 @@ pub struct AudioService {
 impl AudioService {
     #[cfg(test)]
     pub fn mock() -> (Self, Receiver<AudioRequest>) {
-        let (tx, rx) = mpsc::sync_channel(32);
+        let (tx, rx) = mpsc::sync_channel(COMMAND_QUEUE);
         (
             Self {
                 tx,
@@ -56,7 +57,7 @@ impl AudioService {
     }
 
     pub fn start(ctx: egui::Context, muted: bool) -> Self {
-        let (tx, rx) = mpsc::sync_channel(32);
+        let (tx, rx) = mpsc::sync_channel(COMMAND_QUEUE);
         let snapshot = Arc::new(Mutex::new(AudioSnapshot {
             opening: true,
             ..Default::default()
@@ -69,10 +70,10 @@ impl AudioService {
             let mut state = AudioSnapshot::default();
             let mut desired_device = Some(None);
             let mut gain = if muted { 0.0 } else { 1.0 };
-            let mut rate = 1.0;
+            let mut rate = controls::RATE_DEFAULT;
             let mut refresh = true;
             while !stop.load(Ordering::Acquire) {
-                for _ in 0..32 {
+                for _ in 0..COMMAND_QUEUE {
                     let Ok(request) = rx.try_recv() else { break };
                     match request {
                         AudioRequest::Device(index) => {
@@ -124,8 +125,8 @@ impl AudioService {
                 }
                 state.status = engine.as_ref().map(Engine::status);
                 *output.lock().unwrap() = state.clone();
-                ctx.request_repaint_after(Duration::from_millis(33));
-                thread::sleep(Duration::from_millis(10));
+                ctx.request_repaint_after(Duration::from_millis(REPAINT_MS));
+                thread::sleep(Duration::from_millis(POLL_MS));
             }
         });
         Self {
@@ -201,7 +202,7 @@ fn deliver<T>(
             Err(TrySendError::Disconnected(_)) => return false,
             Err(TrySendError::Full(returned)) => {
                 event = returned;
-                thread::sleep(Duration::from_millis(2));
+                thread::sleep(Duration::from_millis(BACKPRESSURE_MS));
             }
         }
     }
@@ -215,19 +216,19 @@ impl LibraryService {
         let version = generation.clone();
         let shutdown = Arc::new(AtomicBool::new(false));
         let stop = shutdown.clone();
-        let (tx, rx) = mpsc::sync_channel(8);
+        let (tx, rx) = mpsc::sync_channel(SCAN_QUEUE);
         thread::spawn(move || {
             while !stop.load(Ordering::Acquire) {
                 let next = jobs.lock().unwrap().take();
                 let Some(job) = next else {
-                    thread::sleep(Duration::from_millis(10));
+                    thread::sleep(Duration::from_millis(POLL_MS));
                     continue;
                 };
                 let cancelled = || {
                     stop.load(Ordering::Acquire)
                         || version.load(Ordering::Acquire) != job.generation
                 };
-                let mut batch = Vec::with_capacity(128);
+                let mut batch = Vec::with_capacity(SCAN_BATCH);
                 let result = (|| -> anyhow::Result<()> {
                     let mut catalog = Catalog::load(&catalog_path)?;
                     if !job.imports.is_empty() {
@@ -245,12 +246,12 @@ impl LibraryService {
                                 Ok(path) if !seen.contains(&path) => {
                                     if seen.len() >= MAX_FILES {
                                         anyhow::bail!(
-                                            "100,000-file display limit reached; narrow the imported library"
+                                            "{MAX_FILES}-file display limit reached; narrow the imported library"
                                         );
                                     }
                                     seen.insert(path.clone());
                                     batch.push(Entry::new(path));
-                                    if batch.len() == 128
+                                    if batch.len() == SCAN_BATCH
                                         && !deliver(
                                             &tx,
                                             ScanEvent::Batch(
@@ -327,30 +328,51 @@ impl Drop for LibraryService {
 pub enum AnalysisEvent {
     Metadata(u64, Result<AudioInfo, String>),
     Waveform(u64, Result<Waveform, String>),
+    #[cfg(feature = "spectrogram")]
+    Spectrogram(
+        u64,
+        Result<Option<crate::spectral::RenderedSpectrum>, String>,
+    ),
+}
+#[derive(Default)]
+pub struct AnalysisOptions {
+    #[cfg(feature = "spectrogram")]
+    pub spectral: Option<crate::spectral::RenderSettings>,
+}
+struct AnalysisJob {
+    id: u64,
+    path: PathBuf,
+    #[cfg(feature = "spectrogram")]
+    options: AnalysisOptions,
 }
 pub struct AnalysisService {
-    job: Arc<Mutex<Option<(u64, PathBuf)>>>,
+    job: Arc<Mutex<Option<AnalysisJob>>>,
     generation: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
     pub rx: Receiver<AnalysisEvent>,
 }
 impl AnalysisService {
     pub fn start(ctx: egui::Context, cache: PathBuf) -> Self {
-        let job = Arc::new(Mutex::new(None::<(u64, PathBuf)>));
+        let job = Arc::new(Mutex::new(None::<AnalysisJob>));
         let jobs = job.clone();
         let generation = Arc::new(AtomicU64::new(0));
         let version = generation.clone();
         let shutdown = Arc::new(AtomicBool::new(false));
         let stop = shutdown.clone();
-        let (tx, rx) = mpsc::sync_channel(4);
+        let (tx, rx) = mpsc::sync_channel(ANALYSIS_QUEUE);
         thread::spawn(move || {
+            #[cfg(feature = "spectrogram")]
+            let spectral_cache =
+                frx_core::spectrogram::SpectrogramCache::new(cache.join("spectrograms"));
             let cache = WaveformCache::new(cache);
             while !stop.load(Ordering::Acquire) {
                 let next = jobs.lock().unwrap().take();
-                let Some((id, path)) = next else {
-                    thread::sleep(Duration::from_millis(10));
+                let Some(job) = next else {
+                    thread::sleep(Duration::from_millis(POLL_MS));
                     continue;
                 };
+                let id = job.id;
+                let path = job.path;
                 let cancelled =
                     || stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != id;
                 let info = inspect(&path).map_err(|e| format!("{e:#}"));
@@ -359,10 +381,25 @@ impl AnalysisService {
                     continue;
                 }
                 let wave = cache
-                    .get_cancellable(&path, 4096, cancelled)
+                    .get_cancellable(&path, DEFAULT_WAVEFORM_BINS, cancelled)
                     .map(|c| c.waveform)
                     .map_err(|e| format!("{e:#}"));
-                deliver(&tx, AnalysisEvent::Waveform(id, wave), cancelled, &ctx);
+                if !deliver(&tx, AnalysisEvent::Waveform(id, wave), cancelled, &ctx) {
+                    continue;
+                }
+                #[cfg(feature = "spectrogram")]
+                if let Some(settings) = job.options.spectral {
+                    let spectrum = spectral_cache
+                        .get(&path, settings.analysis, cancelled)
+                        .map(|cached| crate::spectral::render(cached.spectrogram, settings))
+                        .map_err(|e| format!("{e:#}"));
+                    deliver(
+                        &tx,
+                        AnalysisEvent::Spectrogram(id, spectrum),
+                        cancelled,
+                        &ctx,
+                    );
+                }
             }
         });
         Self {
@@ -372,9 +409,19 @@ impl AnalysisService {
             rx,
         }
     }
+    #[cfg(test)]
     pub fn request(&self, path: PathBuf) -> u64 {
+        self.request_with_options(path, AnalysisOptions::default())
+    }
+
+    pub fn request_with_options(&self, path: PathBuf, _options: AnalysisOptions) -> u64 {
         let id = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-        *self.job.lock().unwrap() = Some((id, path));
+        *self.job.lock().unwrap() = Some(AnalysisJob {
+            id,
+            path,
+            #[cfg(feature = "spectrogram")]
+            options: _options,
+        });
         id
     }
 }

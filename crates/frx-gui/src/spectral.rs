@@ -1,0 +1,228 @@
+//! Spectrogram presentation. FFT/normalization live in frx-core; color conversion
+//! runs on the analysis worker, texture upload/painting on the GUI thread.
+use crate::{
+    config::{controls as c, layout as l},
+    theme, widgets,
+};
+use eframe::egui::{self, Color32, Sense, pos2, vec2};
+use frx_core::{
+    config::spectral as dsp,
+    spectrogram::{Settings, Spectrogram},
+};
+
+#[derive(Clone, Copy, Debug)]
+pub struct RenderSettings {
+    pub analysis: Settings,
+    pub floor_db: f32,
+}
+pub struct RenderedSpectrum {
+    pub image: egui::ColorImage,
+    pub nyquist_hz: f32,
+}
+
+pub fn color(db: f32, floor: f32) -> Color32 {
+    let fraction = ((db - floor) / (c::SPECTRAL_CEILING_DB - floor)).clamp(0.0, 1.0);
+    let last = theme::SPECTRAL_PALETTE.len() - 1;
+    let at = fraction * last as f32;
+    let index = (at.floor() as usize).min(last - 1);
+    let mix = at - index as f32;
+    let a = theme::SPECTRAL_PALETTE[index].to_array();
+    let b = theme::SPECTRAL_PALETTE[index + 1].to_array();
+    let rgb: [u8; 3] =
+        std::array::from_fn(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * mix).round() as u8);
+    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+}
+
+pub fn render(data: Spectrogram, settings: RenderSettings) -> Option<RenderedSpectrum> {
+    if data.columns == 0 {
+        return None;
+    }
+    let pixels = (0..data.frequency_bins)
+        .flat_map(|y| {
+            let data = &data;
+            (0..data.columns).map(move |x| {
+                color(
+                    data.dbfs[x * data.frequency_bins + data.frequency_bins - 1 - y],
+                    settings.floor_db,
+                )
+            })
+        })
+        .collect();
+    Some(RenderedSpectrum {
+        image: egui::ColorImage::new([data.columns, data.frequency_bins], pixels),
+        nyquist_hz: data.sample_rate as f32 / 2.0,
+    })
+}
+
+pub struct View {
+    pub enabled: bool,
+    pub pending: bool,
+    fft_size: usize,
+    floor_db: f64,
+    texture: Option<egui::TextureHandle>,
+    nyquist_hz: f32,
+}
+impl Default for View {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            pending: false,
+            fft_size: dsp::DEFAULT_FFT_SIZE,
+            floor_db: c::SPECTRAL_FLOOR_DEFAULT,
+            texture: None,
+            nyquist_hz: 0.0,
+        }
+    }
+}
+impl View {
+    pub fn settings(&self) -> Option<RenderSettings> {
+        self.enabled.then_some(RenderSettings {
+            analysis: Settings {
+                fft_size: self.fft_size,
+            },
+            floor_db: self.floor_db as f32,
+        })
+    }
+    pub fn clear(&mut self) {
+        self.texture = None;
+        self.pending = self.enabled;
+    }
+    pub fn controls(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed =
+            widgets::reset_toggle(ui, &mut self.enabled, true, "Spectrogram").changed();
+        if self.enabled {
+            let previous = self.fft_size;
+            let combo = egui::ComboBox::from_id_salt("fft_size")
+                .selected_text(format!("FFT: {} samples", self.fft_size))
+                .show_ui(ui, |ui| {
+                    for &size in dsp::FFT_SIZES {
+                        ui.selectable_value(&mut self.fft_size, size, size.to_string());
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "Periodic Hann window, 75% overlap. Double-click to reset FFT size.",
+                );
+            if combo.double_clicked() {
+                self.fft_size = dsp::DEFAULT_FFT_SIZE;
+            }
+            changed |= previous != self.fft_size;
+            ui.small("Display floor (dBFS)");
+            let floor = widgets::reset_slider(
+                ui,
+                &mut self.floor_db,
+                c::SPECTRAL_FLOOR_MIN..=c::SPECTRAL_FLOOR_MAX,
+                c::SPECTRAL_FLOOR_DEFAULT,
+                " dBFS",
+            );
+            changed |= floor.drag_stopped() || (floor.changed() && !floor.dragged());
+        }
+        changed
+    }
+    pub fn accept(
+        &mut self,
+        ctx: &egui::Context,
+        result: Result<Option<RenderedSpectrum>, String>,
+    ) -> Result<(), String> {
+        self.pending = false;
+        let rendered = result?;
+        self.texture = rendered.map(|rendered| {
+            self.nyquist_hz = rendered.nyquist_hz;
+            ctx.load_texture("spectrogram", rendered.image, egui::TextureOptions::LINEAR)
+        });
+        Ok(())
+    }
+    pub fn has_image(&self) -> bool {
+        self.texture.is_some()
+    }
+    pub fn paint(
+        &self,
+        ui: &mut egui::Ui,
+        position: f64,
+        duration: f64,
+        height: f32,
+    ) -> egui::Response {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("SOURCE SPECTROGRAM · dBFS")
+                    .size(l::SMALL_FONT)
+                    .color(theme::MUTED),
+            );
+            if self.pending {
+                ui.spinner();
+            }
+        });
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, l::PLOT_RADIUS, theme::PANEL);
+        if let Some(texture) = &self.texture {
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+            painter.text(
+                rect.left_top() + vec2(l::SPACE_SMALL, l::SPACE_SMALL),
+                egui::Align2::LEFT_TOP,
+                format!("{:.1} kHz", self.nyquist_hz / 1000.0),
+                egui::FontId::monospace(l::SMALL_FONT),
+                theme::TEXT,
+            );
+            painter.text(
+                rect.left_bottom() + vec2(l::SPACE_SMALL, -l::SPACE_SMALL),
+                egui::Align2::LEFT_BOTTOM,
+                "0 Hz",
+                egui::FontId::monospace(l::SMALL_FONT),
+                theme::TEXT,
+            );
+            painter.text(
+                rect.right_top() + vec2(-l::SPACE_SMALL, l::SPACE_SMALL),
+                egui::Align2::RIGHT_TOP,
+                format!("{:.0} … 0 dBFS", self.floor_db),
+                egui::FontId::monospace(l::SMALL_FONT),
+                theme::TEXT,
+            );
+        } else {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                if self.pending {
+                    "Spectral analysis in background…"
+                } else {
+                    "No spectral data"
+                },
+                egui::FontId::proportional(l::BODY_FONT),
+                theme::MUTED,
+            );
+        }
+        widgets::playhead(&painter, rect, position, duration);
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn frequency_orientation_and_palette_limits_are_correct() {
+        let settings = RenderSettings {
+            analysis: Settings::default(),
+            floor_db: -100.0,
+        };
+        let data = Spectrogram {
+            sample_rate: 48000,
+            frames: 1,
+            fft_size: 2048,
+            hop_size: 512,
+            windows_per_column: 1,
+            columns: 1,
+            frequency_bins: 2,
+            dbfs: vec![-160.0, 0.0],
+        };
+        let image = render(data, settings).unwrap().image;
+        assert_eq!(image.pixels[0], *theme::SPECTRAL_PALETTE.last().unwrap());
+        assert_eq!(image.pixels[1], theme::SPECTRAL_PALETTE[0]);
+    }
+}

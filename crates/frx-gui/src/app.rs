@@ -1,19 +1,28 @@
+//! UI state and routing only. Paint/layout lives in panels/widgets; audio and
+//! filesystem work is delegated to services backed by the headless crates.
+#[path = "panels.rs"]
+mod panels;
 #[cfg(test)]
 #[path = "app_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+use crate::widgets::waveform_view;
 use crate::{
     Args,
-    model::{Browser, clock, seek_at},
+    config::{controls as c, runtime as r},
+    model::{Browser, seek_at},
     services::{
-        AnalysisEvent, AnalysisService, AudioRequest, AudioService, AudioSnapshot, LibraryService,
-        ScanEvent,
+        AnalysisEvent, AnalysisOptions, AnalysisService, AudioRequest, AudioService, AudioSnapshot,
+        LibraryService, ScanEvent,
     },
     theme,
 };
-use eframe::egui::{self, Color32, RichText, Sense, Stroke, pos2, vec2};
+use eframe::egui;
+#[cfg(test)]
+use eframe::egui::{pos2, vec2};
 use frx_audio::Command;
-use frx_core::{decode::AudioInfo, waveform::Waveform};
+use frx_core::{decode::AudioInfo, levels::db_to_gain, waveform::Waveform};
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver},
@@ -36,12 +45,19 @@ pub struct App {
     info: Option<AudioInfo>,
     waveform: Option<Waveform>,
     error: Option<String>,
-    gain: f32,
+    gain_db: f64,
+    muted: bool,
+    normalize: bool,
+    pending_play: bool,
+    pending_seek: Option<f64>,
+    normalization_applied: Option<(PathBuf, u64, bool)>,
     rate: f64,
     device: Option<usize>,
     picker: Option<Receiver<Vec<PathBuf>>>,
     logo: egui::TextureHandle,
     seek_sent: Instant,
+    #[cfg(feature = "spectrogram")]
+    spectral: crate::spectral::View,
     started: Instant,
     smoke_seconds: Option<f64>,
     smoke_reported: bool,
@@ -57,7 +73,6 @@ impl App {
         let audio = AudioService::start(ctx.clone(), args.muted);
         Self::with_audio(ctx, args, audio)
     }
-
     fn with_audio(ctx: &egui::Context, args: Args, audio: AudioService) -> Self {
         theme::apply(ctx);
         let image = theme::logo();
@@ -70,7 +85,7 @@ impl App {
             Default::default(),
         );
         let library = LibraryService::start(ctx.clone(), args.library);
-        let scan_id = library.request(args.paths, true);
+        let scan_id = library.request(args.paths, c::RECURSIVE_DEFAULT);
         Self {
             audio,
             snapshot: AudioSnapshot::default(),
@@ -82,17 +97,24 @@ impl App {
             scanning: true,
             scroll_to_selection: false,
             analyzing: false,
-            recursive: true,
-            autoplay: true,
+            recursive: c::RECURSIVE_DEFAULT,
+            autoplay: c::AUTOPLAY_DEFAULT,
             info: None,
             waveform: None,
             error: None,
-            gain: if args.muted { 0.0 } else { 1.0 },
-            rate: 1.0,
+            gain_db: c::GAIN_DEFAULT_DB,
+            muted: args.muted,
+            normalize: c::NORMALIZE_DEFAULT,
+            pending_play: false,
+            pending_seek: None,
+            normalization_applied: None,
+            rate: c::RATE_DEFAULT,
             device: None,
             picker: None,
             logo,
             seek_sent: Instant::now(),
+            #[cfg(feature = "spectrogram")]
+            spectral: Default::default(),
             started: Instant::now(),
             smoke_seconds: args.smoke_seconds,
             smoke_reported: false,
@@ -103,21 +125,152 @@ impl App {
             capture_done: None,
         }
     }
-
+    fn analysis_options(&self) -> AnalysisOptions {
+        AnalysisOptions {
+            #[cfg(feature = "spectrogram")]
+            spectral: self.spectral.settings(),
+        }
+    }
+    fn request_analysis(&mut self, path: PathBuf) {
+        self.analysis_id = self
+            .analysis
+            .request_with_options(path, self.analysis_options());
+        self.analyzing = true;
+        #[cfg(feature = "spectrogram")]
+        {
+            self.spectral.pending = self.spectral.enabled;
+        }
+    }
     fn send(&mut self, command: Command) {
         if let Err(error) = self.audio.send(AudioRequest::Transport(command)) {
             self.error = Some(error);
         }
     }
+    fn send_gain(&mut self) {
+        self.send(Command::Gain {
+            value: if self.muted {
+                0.0
+            } else {
+                db_to_gain(self.gain_db as f32)
+            },
+        });
+    }
+    fn start_selected(&mut self) -> bool {
+        let Some(path) = self.browser.selected.clone() else {
+            return false;
+        };
+        let command = if self.normalize {
+            match self.waveform.as_ref().map(Waveform::normalization) {
+                None => {
+                    if !self.analyzing {
+                        self.error = None;
+                        self.request_analysis(path.clone());
+                    }
+                    self.pending_play = true;
+                    self.send(Command::Stop);
+                    return false;
+                }
+                Some(Err(error)) => {
+                    self.error = Some(error.to_string());
+                    self.stop();
+                    return false;
+                }
+                Some(Ok(n)) => Command::PlayNormalized {
+                    path,
+                    peak: n.source_peak,
+                },
+            }
+        } else {
+            Command::Play { path }
+        };
+        self.pending_play = false;
+        self.send(command);
+        true
+    }
+    fn stop(&mut self) {
+        self.pending_play = false;
+        self.pending_seek = None;
+        self.send(Command::Stop);
+    }
+    fn finish_pending_play(&mut self) {
+        if !self.pending_play || (self.normalize && self.waveform.is_none()) {
+            return;
+        }
+        if self.start_selected() {
+            if let Some(seconds) = self.pending_seek.take() {
+                self.send(Command::Seek { seconds });
+            }
+            self.send(Command::Resume);
+        }
+    }
+    fn normalization_changed(&mut self) {
+        self.normalization_applied = None;
+        if self.normalize
+            && let Some(Err(error)) = self.waveform.as_ref().map(Waveform::normalization)
+        {
+            self.error = Some(error.to_string());
+            self.stop();
+            return;
+        }
+        if self.normalize
+            && self.waveform.is_none()
+            && self
+                .snapshot
+                .status
+                .as_ref()
+                .is_some_and(|s| s.path == self.browser.selected && s.state == "playing")
+        {
+            self.pending_seek = Some(self.position());
+            self.start_selected();
+        }
+        self.finish_pending_play();
+        self.sync_normalization();
+    }
+    fn sync_normalization(&mut self) {
+        let Some(status) = &self.snapshot.status else {
+            return;
+        };
+        let Some(path) = self
+            .browser
+            .selected
+            .clone()
+            .filter(|p| status.path.as_ref() == Some(p))
+        else {
+            return;
+        };
+        let key = (path.clone(), status.generation, self.normalize);
+        if self.normalization_applied.as_ref() == Some(&key) {
+            return;
+        }
+        let peak = if self.normalize {
+            let Some(normalization) = self.waveform.as_ref().and_then(|w| w.normalization().ok())
+            else {
+                return;
+            };
+            Some(normalization.source_peak)
+        } else {
+            None
+        };
+        match self
+            .audio
+            .send(AudioRequest::Transport(Command::Normalize { path, peak }))
+        {
+            Ok(()) => self.normalization_applied = Some(key),
+            Err(error) => self.error = Some(error),
+        }
+    }
     fn select(&mut self, path: PathBuf, audition: bool) {
-        self.analysis_id = self.analysis.request(path.clone());
-        self.browser.selected = Some(path.clone());
+        self.request_analysis(path.clone());
+        self.browser.selected = Some(path);
         self.info = None;
         self.waveform = None;
-        self.analyzing = true;
         self.error = None;
-        if audition {
-            self.send(Command::Play { path });
+        self.normalization_applied = None;
+        self.pending_play = false;
+        self.pending_seek = None;
+        #[cfg(feature = "spectrogram")]
+        self.spectral.clear();
+        if audition && self.start_selected() {
             self.send(Command::Resume);
         }
     }
@@ -127,19 +280,21 @@ impl App {
             self.scroll_to_selection = true;
         }
     }
-
     fn rescan(&mut self, paths: Vec<PathBuf>) {
+        self.pending_play = false;
+        self.pending_seek = None;
         self.scan_id = self.library.request(paths, self.recursive);
         self.browser.clear();
         self.scanning = true;
         self.error = None;
     }
-    fn poll(&mut self) {
+    fn poll(&mut self, ctx: &egui::Context) {
+        #[cfg(not(feature = "spectrogram"))]
+        let _ = ctx;
         if let Some(snapshot) = self.audio.snapshot() {
             self.snapshot = snapshot;
         }
-        // Drain only a bounded batch per UI frame, even during large imports.
-        for _ in 0..8 {
+        for _ in 0..r::SCAN_QUEUE {
             let Ok(event) = self.library.rx.try_recv() else {
                 break;
             };
@@ -161,7 +316,7 @@ impl App {
                 _ => {}
             }
         }
-        for _ in 0..4 {
+        for _ in 0..r::ANALYSIS_QUEUE {
             let Ok(event) = self.analysis.rx.try_recv() else {
                 break;
             };
@@ -170,14 +325,31 @@ impl App {
                     Ok(info) => self.info = Some(info),
                     Err(error) => {
                         self.error = Some(error);
+                        self.pending_play = false;
+                        self.pending_seek = None;
                         self.analyzing = false;
+                        #[cfg(feature = "spectrogram")]
+                        {
+                            self.spectral.pending = false;
+                        }
                     }
                 },
                 AnalysisEvent::Waveform(id, result) if id == self.analysis_id => {
                     self.analyzing = false;
+                    self.normalization_applied = None;
                     match result {
                         Ok(waveform) => self.waveform = Some(waveform),
-                        Err(error) => self.error = Some(error),
+                        Err(error) => {
+                            self.error = Some(error);
+                            self.pending_play = false;
+                            self.pending_seek = None;
+                        }
+                    }
+                }
+                #[cfg(feature = "spectrogram")]
+                AnalysisEvent::Spectrogram(id, result) if id == self.analysis_id => {
+                    if let Err(error) = self.spectral.accept(ctx, result) {
+                        self.error = Some(error);
                     }
                 }
                 _ => {}
@@ -198,6 +370,8 @@ impl App {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
+        self.finish_pending_play();
+        self.sync_normalization();
     }
     fn choose(&mut self, folder: bool, ctx: &egui::Context) {
         let (tx, rx) = mpsc::sync_channel(1);
@@ -240,6 +414,15 @@ impl App {
             .map_or(0.0, |s| s.position_seconds)
     }
     fn toggle_play(&mut self) {
+        if self.pending_play {
+            self.stop();
+            return;
+        }
+        if self.normalize && self.waveform.is_none() {
+            self.pending_seek = Some(self.position());
+            self.start_selected();
+            return;
+        }
         let Some(path) = self.browser.selected.clone() else {
             return;
         };
@@ -253,12 +436,17 @@ impl App {
             Some("playing") => self.send(Command::Pause),
             Some("paused") => self.send(Command::Resume),
             _ => {
-                self.send(Command::Play { path });
-                self.send(Command::Resume);
+                if self.start_selected() {
+                    self.send(Command::Resume);
+                }
             }
         }
     }
     fn seek(&mut self, seconds: f64) {
+        if self.pending_play {
+            self.pending_seek = Some(seconds);
+            return;
+        }
         let Some(path) = self.browser.selected.clone() else {
             return;
         };
@@ -267,11 +455,33 @@ impl App {
             .status
             .as_ref()
             .is_some_and(|s| s.path.as_ref() == Some(&path) && s.state != "error")
+            && !self.start_selected()
         {
-            self.send(Command::Play { path });
+            if self.pending_play {
+                self.pending_seek = Some(seconds);
+            }
+            return;
         }
         self.send(Command::Seek { seconds });
         self.seek_sent = Instant::now();
+    }
+    fn handle_seek(&mut self, response: egui::Response) {
+        if response.double_clicked() {
+            self.seek(0.0);
+            return;
+        }
+        if (response.clicked()
+            || response.drag_stopped()
+            || (response.dragged()
+                && self.seek_sent.elapsed() > Duration::from_millis(r::SEEK_THROTTLE_MS)))
+            && let Some(pointer) = response.interact_pointer_pos()
+            && let Some(seconds) = seek_at(
+                (pointer.x - response.rect.left()) / response.rect.width(),
+                self.duration(),
+            )
+        {
+            self.seek(seconds);
+        }
     }
     fn keyboard(&mut self, ctx: &egui::Context) {
         if ctx.wants_keyboard_input() {
@@ -294,9 +504,9 @@ impl App {
         }
         let delta = ctx.input(|i| {
             if i.key_pressed(egui::Key::ArrowRight) {
-                5.0
+                r::KEY_SEEK_SECONDS
             } else if i.key_pressed(egui::Key::ArrowLeft) {
-                -5.0
+                -r::KEY_SEEK_SECONDS
             } else {
                 0.0
             }
@@ -305,432 +515,9 @@ impl App {
             self.seek((self.position() + delta).clamp(0.0, self.duration()));
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.send(Command::Stop);
+            self.stop();
         }
     }
-
-    fn header(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("header")
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(14))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.image((self.logo.id(), vec2(36.0, 36.0)));
-                    ui.label(RichText::new("frxview").size(25.0).strong());
-                    ui.label(RichText::new("/  JESDEV").color(theme::AMBER).size(12.0));
-                    ui.separator();
-                    ui.add_enabled_ui(self.picker.is_none(), |ui| {
-                        if ui.button("+ Files").clicked() {
-                            self.choose(false, ctx);
-                        }
-                        if ui.button("+ Folder").clicked() {
-                            self.choose(true, ctx);
-                        }
-                    });
-                    if self.picker.is_some() {
-                        ui.spinner();
-                        ui.small("Waiting for file chooser");
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new("LOCAL AUDIO · NO UPLOADS")
-                                .size(11.0)
-                                .color(theme::MUTED),
-                        );
-                    });
-                });
-            });
-    }
-    fn footer(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {
-            let error = self
-                .error
-                .as_ref()
-                .or(self.snapshot.error.as_ref())
-                .or_else(|| self.snapshot.status.as_ref().and_then(|s| s.error.as_ref()));
-            if let Some(error) = error {
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(Color32::from_rgb(255, 132, 113), error);
-                });
-                if self.error.is_some() && ui.small_button("Dismiss").clicked() {
-                    self.error = None;
-                }
-            }
-            ui.horizontal(|ui| {
-                ui.small(
-                    RichText::new(
-                        "Space: play/pause    Up/Down: browse    Left/Right: seek    Esc: stop",
-                    )
-                    .color(theme::MUTED),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.snapshot.opening {
-                        ui.spinner();
-                        ui.small("Opening output…");
-                    } else {
-                        ui.small(
-                            self.snapshot
-                                .status
-                                .as_ref()
-                                .map_or("No output", |s| s.state),
-                        );
-                    }
-                });
-            });
-        });
-    }
-    fn browser_panel(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("browser")
-            .default_width(280.0)
-            .min_width(200.0)
-            .max_width(500.0)
-            .show(ctx, |ui| {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.heading("LIBRARY");
-                    if self.scanning {
-                        ui.spinner();
-                    }
-                });
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut self.browser.query)
-                            .hint_text("Filter filename or path…")
-                            .desired_width(f32::INFINITY),
-                    )
-                    .changed()
-                {
-                    self.browser.filter();
-                }
-                ui.horizontal(|ui| {
-                    if ui.checkbox(&mut self.recursive, "Subfolders").changed() {
-                        self.rescan(Vec::new());
-                    }
-                    if ui.small_button("Refresh").clicked() {
-                        self.rescan(Vec::new());
-                    }
-                });
-                ui.checkbox(&mut self.autoplay, "Audition on selection");
-                ui.small(format!(
-                    "{} shown / {} files",
-                    self.browser.visible.len(),
-                    self.browser.entries.len()
-                ));
-                ui.separator();
-                if self.browser.entries.is_empty() && !self.scanning {
-                    ui.add_space(24.0);
-                    ui.label("Drop audio files or folders here.");
-                    ui.label(
-                        RichText::new("Imported files stay where they are.").color(theme::MUTED),
-                    );
-                } else if self.browser.visible.is_empty() && !self.scanning {
-                    ui.label("No matching files.");
-                }
-                let mut clicked = None;
-                let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
-                if self.scroll_to_selection {
-                    if let Some(row) = self.browser.visible.iter().position(|&i| {
-                        Some(&self.browser.entries[i].path) == self.browser.selected.as_ref()
-                    }) {
-                        scroll = scroll.vertical_scroll_offset(
-                            row.saturating_sub(3) as f32 * (30.0 + ui.spacing().item_spacing.y),
-                        );
-                    }
-                    self.scroll_to_selection = false;
-                }
-                scroll.show_rows(ui, 30.0, self.browser.visible.len(), |ui, range| {
-                    for row in range {
-                        let entry = &self.browser.entries[self.browser.visible[row]];
-                        let selected = self.browser.selected.as_ref() == Some(&entry.path);
-                        let response = ui.add_sized(
-                            [ui.available_width(), 30.0],
-                            egui::Button::new(&entry.name).selected(selected).truncate(),
-                        );
-                        let response = response.on_hover_text(entry.path.display().to_string());
-                        if response.clicked() {
-                            clicked = Some(entry.path.clone());
-                        }
-                    }
-                });
-                if let Some(path) = clicked {
-                    self.select(path, self.autoplay);
-                }
-            });
-    }
-    fn settings(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::right("settings")
-            .default_width(230.0)
-            .min_width(210.0)
-            .max_width(320.0)
-            .show(ctx, |ui| {
-                ui.add_space(8.0);
-                ui.heading("PLAYBACK");
-                ui.add_space(12.0);
-                ui.label("Output device");
-                let previous = self.device;
-                let label = self
-                    .device
-                    .and_then(|index| {
-                        self.snapshot
-                            .devices
-                            .iter()
-                            .find(|d| d.index == index)
-                            .map(|d| d.name.as_str())
-                    })
-                    .unwrap_or("System default");
-                egui::ComboBox::from_id_salt("devices")
-                    .selected_text(label)
-                    .width(ui.available_width() - 10.0)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.device, None, "System default");
-                        for device in &self.snapshot.devices {
-                            ui.selectable_value(&mut self.device, Some(device.index), &device.name)
-                                .on_hover_text(
-                                    device
-                                        .default_config
-                                        .as_deref()
-                                        .unwrap_or("Unavailable configuration"),
-                                );
-                        }
-                    });
-                let retry = ui.button("Retry output").clicked();
-                if (self.device != previous || retry)
-                    && let Err(e) = self.audio.send(AudioRequest::Device(self.device))
-                {
-                    self.error = Some(e);
-                }
-                if ui.small_button("Refresh devices").clicked()
-                    && let Err(e) = self.audio.send(AudioRequest::Refresh)
-                {
-                    self.error = Some(e);
-                }
-                ui.small(RichText::new("Changing output stops playback.").color(theme::MUTED));
-                ui.add_space(16.0);
-                ui.separator();
-                ui.label("Gain");
-                if ui
-                    .add(egui::Slider::new(&mut self.gain, 0.0..=2.0).suffix(" ×"))
-                    .changed()
-                {
-                    self.send(Command::Gain { value: self.gain });
-                }
-                ui.horizontal(|ui| {
-                    if ui.button("Mute").clicked() {
-                        self.gain = 0.0;
-                        self.send(Command::Gain { value: 0.0 });
-                    }
-                    if ui.button("Unity").clicked() {
-                        self.gain = 1.0;
-                        self.send(Command::Gain { value: 1.0 });
-                    }
-                });
-                ui.add_space(12.0);
-                ui.label("Playback rate");
-                let rate_response =
-                    ui.add(egui::Slider::new(&mut self.rate, 0.25..=4.0).suffix(" ×"));
-                // Submit on release/keyboard changes, not every pixel of a rate drag.
-                if rate_response.drag_stopped()
-                    || (rate_response.changed() && !rate_response.dragged())
-                {
-                    self.send(Command::Rate { value: self.rate });
-                }
-                if ui.small_button("Reset 1×").clicked() {
-                    self.rate = 1.0;
-                    self.send(Command::Rate { value: 1.0 });
-                }
-                ui.small(
-                    RichText::new("Rate changes pitch. Preview-quality interpolation.")
-                        .color(theme::MUTED),
-                );
-                ui.add_space(18.0);
-                ui.separator();
-                ui.label("OUTPUT PEAK");
-                let peak = self.snapshot.status.as_ref().map_or(0.0, |s| s.peak);
-                let db = if peak > 0.0 {
-                    20.0 * peak.log10()
-                } else {
-                    -60.0
-                };
-                let fraction = ((db + 60.0) / 60.0).clamp(0.0, 1.0);
-                ui.add(
-                    egui::ProgressBar::new(fraction)
-                        .fill(if peak >= 1.0 {
-                            Color32::from_rgb(255, 94, 78)
-                        } else {
-                            theme::AMBER
-                        })
-                        .text(if peak > 0.0 {
-                            format!("{db:.1} dBFS")
-                        } else {
-                            "−∞ dBFS".into()
-                        }),
-                );
-                ui.small(
-                    RichText::new("Callback peak · not a calibrated VU meter").color(theme::MUTED),
-                );
-                if let Some(status) = &self.snapshot.status {
-                    ui.add_space(8.0);
-                    ui.small(format!("Clipped samples: {}", status.clipped_samples));
-                    ui.small(format!("Buffer shortages: {}", status.underrun_callbacks))
-                        .on_hover_text("Includes seek/switch transition gaps.");
-                }
-                ui.add_space(16.0);
-                ui.separator();
-                ui.small(
-                    RichText::new(
-                        "Spectrogram and spectrum analysis are planned, not enabled in this build.",
-                    )
-                    .color(theme::MUTED),
-                );
-            });
-    }
-    fn center(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(22))
-            .show(ctx, |ui| {
-                let Some(path) = &self.browser.selected else {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(ui.available_height() * 0.25);
-                        ui.image((self.logo.id(), vec2(96.0, 96.0)));
-                        ui.add_space(20.0);
-                        ui.heading("Find the sound.");
-                        ui.label(
-                            RichText::new("Import a folder. Browse. Listen.").color(theme::MUTED),
-                        );
-                        ui.add_space(16.0);
-                        if ui.button("Open audio folder").clicked() && self.picker.is_none() {
-                            self.choose(true, ctx);
-                        }
-                    });
-                    return;
-                };
-                ui.label(
-                    RichText::new("SELECTED RECORDING")
-                        .size(10.0)
-                        .color(theme::AMBER),
-                );
-                ui.heading(path.file_name().unwrap_or_default().to_string_lossy())
-                    .on_hover_text(path.display().to_string());
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(path.display().to_string())
-                            .size(11.0)
-                            .color(theme::MUTED),
-                    )
-                    .truncate(),
-                );
-                ui.add_space(12.0);
-                if let Some(info) = &self.info {
-                    ui.horizontal_wrapped(|ui| {
-                        for (label, value) in [
-                            ("DURATION", clock(self.duration())),
-                            ("SAMPLE RATE", format!("{} Hz", info.sample_rate)),
-                            ("CHANNELS", info.channels.to_string()),
-                            (
-                                "RESOLUTION",
-                                info.bits_per_sample
-                                    .map_or("Compressed".into(), |v| format!("{v}-bit")),
-                            ),
-                        ] {
-                            egui::Frame::new()
-                                .fill(theme::PANEL)
-                                .inner_margin(10)
-                                .corner_radius(5)
-                                .show(ui, |ui| {
-                                    ui.label(RichText::new(label).size(10.0).color(theme::MUTED));
-                                    ui.label(RichText::new(value).strong());
-                                });
-                        }
-                    });
-                    if !info.tags.is_empty() {
-                        egui::CollapsingHeader::new(format!(
-                            "Embedded metadata ({})",
-                            info.tags.len()
-                        ))
-                        .show(ui, |ui| {
-                            egui::ScrollArea::vertical()
-                                .max_height(100.0)
-                                .show(ui, |ui| {
-                                    for (key, value) in &info.tags {
-                                        ui.label(format!("{key}: {value}"));
-                                    }
-                                });
-                        });
-                    }
-                } else if self.analyzing {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Reading metadata…");
-                    });
-                }
-                ui.add_space(20.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("WAVEFORM").size(11.0).color(theme::MUTED));
-                    if self.analyzing {
-                        ui.spinner();
-                        ui.small("Analyzing in background — playback available");
-                    }
-                });
-                let duration = self.duration();
-                let position = self.position();
-                let height = (ui.available_height() - 135.0).clamp(100.0, 380.0);
-                let response =
-                    waveform_view(ui, self.waveform.as_ref(), position, duration, height);
-                if (response.clicked()
-                    || response.drag_stopped()
-                    || (response.dragged() && self.seek_sent.elapsed() > Duration::from_millis(80)))
-                    && let Some(pointer) = response.interact_pointer_pos()
-                    && let Some(seconds) = seek_at(
-                        (pointer.x - response.rect.left()) / response.rect.width(),
-                        duration,
-                    )
-                {
-                    self.seek(seconds);
-                }
-                ui.horizontal(|ui| {
-                    ui.monospace(clock(position));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.monospace(clock(duration));
-                    });
-                });
-                ui.add_space(12.0);
-                let playing = self
-                    .snapshot
-                    .status
-                    .as_ref()
-                    .is_some_and(|s| s.state == "playing" && s.path == self.browser.selected);
-                ui.horizontal(|ui| {
-                    if ui
-                        .button("|<")
-                        .on_hover_text("Previous visible file")
-                        .clicked()
-                    {
-                        self.navigate(-1);
-                    }
-                    if ui
-                        .add_sized(
-                            [110.0, 38.0],
-                            egui::Button::new(
-                                RichText::new(if playing { "Pause" } else { "Play" })
-                                    .color(Color32::BLACK)
-                                    .strong(),
-                            )
-                            .fill(theme::AMBER),
-                        )
-                        .clicked()
-                    {
-                        self.toggle_play();
-                    }
-                    if ui.button("Stop").clicked() {
-                        self.send(Command::Stop);
-                    }
-                    if ui.button(">|").on_hover_text("Next visible file").clicked() {
-                        self.navigate(1);
-                    }
-                });
-                ui.small(RichText::new("Click or drag the waveform to seek.").color(theme::MUTED));
-            });
-    }
-
     fn diagnostic(&mut self, ctx: &egui::Context) {
         let Some(seconds) = self.smoke_seconds else {
             return;
@@ -738,15 +525,16 @@ impl App {
         let elapsed = self.started.elapsed().as_secs_f64();
         if elapsed >= seconds && !self.smoke_reported {
             self.smoke_reported = true;
+            #[cfg(feature = "spectrogram")]
+            let spectral_ready = self.spectral.has_image();
+            #[cfg(not(feature = "spectrogram"))]
+            let spectral_ready = false;
             println!(
                 "{}",
-                serde_json::json!({
-                    "library_candidates": self.browser.entries.len(),
-                    "visible_count": self.browser.visible.len(),
-                    "scanning": self.scanning, "analyzing": self.analyzing,
-                    "waveform_bins": self.waveform.as_ref().map_or(0, |w| w.peaks.len()),
-                    "frames": self.frame_count, "max_update_cpu_ms": self.max_update_ms,
-                })
+                serde_json::json!({ "library_candidates": self.browser.entries.len(), "visible_count": self.browser.visible.len(),
+                "scanning": self.scanning, "analyzing": self.analyzing, "waveform_bins": self.waveform.as_ref().map_or(0, |w| w.peaks.len()),
+                "spectrogram_feature": cfg!(feature = "spectrogram"), "spectrogram_ready": spectral_ready,
+                "frames": self.frame_count, "max_update_cpu_ms": self.max_update_ms })
             );
         }
         if self.screenshot.is_some() && !self.capture_requested && elapsed >= seconds {
@@ -799,19 +587,18 @@ impl App {
         if elapsed >= seconds && !self.capture_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if elapsed > seconds + 10.0 {
+        if elapsed > seconds + r::CAPTURE_TIMEOUT_SECONDS {
             crate::SMOKE_FAILED.store(true, std::sync::atomic::Ordering::Relaxed);
             eprintln!("Screenshot timeout");
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        ctx.request_repaint_after(Duration::from_millis(33));
+        ctx.request_repaint_after(Duration::from_millis(r::REPAINT_MS));
     }
 }
-
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let started = Instant::now();
-        self.poll();
+        self.poll(ctx);
         self.keyboard(ctx);
         let dropped = ctx.input(|i| {
             i.raw
@@ -834,71 +621,4 @@ impl eframe::App for App {
             .max_update_ms
             .max(started.elapsed().as_secs_f64() * 1000.0);
     }
-}
-
-fn waveform_view(
-    ui: &mut egui::Ui,
-    waveform: Option<&Waveform>,
-    position: f64,
-    duration: f64,
-    height: f32,
-) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 6.0, theme::PANEL);
-    for i in 1..4 {
-        let y = rect.top() + rect.height() * i as f32 / 4.0;
-        painter.line_segment(
-            [pos2(rect.left(), y), pos2(rect.right(), y)],
-            Stroke::new(1.0, theme::RAISED),
-        );
-    }
-    for i in 1..10 {
-        let x = rect.left() + rect.width() * i as f32 / 10.0;
-        painter.line_segment(
-            [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(1.0, theme::RAISED),
-        );
-    }
-    if let Some(waveform) = waveform {
-        // Group bins per physical column, preserving extrema instead of skipping peaks.
-        let columns = (rect.width().ceil() as usize)
-            .max(1)
-            .min(waveform.peaks.len());
-        for column in 0..columns {
-            let start = column * waveform.peaks.len() / columns;
-            let end = ((column + 1) * waveform.peaks.len() / columns).max(start + 1);
-            let (min, max) = waveform.peaks[start..end]
-                .iter()
-                .fold((1f32, -1f32), |(min, max), p| {
-                    (min.min(p.min), max.max(p.max))
-                });
-            let x = rect.left() + (column as f32 + 0.5) / columns as f32 * rect.width();
-            let scale = rect.height() * 0.43;
-            painter.line_segment(
-                [
-                    pos2(x, rect.center().y - max.clamp(-1.0, 1.0) * scale),
-                    pos2(x, rect.center().y - min.clamp(-1.0, 1.0) * scale),
-                ],
-                Stroke::new(1.0, theme::AMBER),
-            );
-        }
-    } else {
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "Waveform preview",
-            egui::FontId::proportional(14.0),
-            theme::MUTED,
-        );
-    }
-    if duration > 0.0 {
-        let x = rect.left() + (position / duration).clamp(0.0, 1.0) as f32 * rect.width();
-        painter.line_segment(
-            [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(2.0, theme::PURPLE),
-        );
-    }
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
