@@ -1,6 +1,6 @@
 use super::App;
 use crate::{
-    config::{controls as c, layout as l},
+    config::{controls as c, layout as l, runtime as r},
     model::clock,
     services::AudioRequest,
     theme, widgets,
@@ -32,6 +32,82 @@ impl App {
                             .color(theme::AMBER)
                             .size(l::BRAND_SUBFONT),
                     );
+                    ui.separator();
+                    // Classic top-bar menu exporting the main CLI-equivalent actions.
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Import files…").clicked() {
+                            self.choose(false, ctx);
+                            ui.close();
+                        }
+                        if ui.button("Import folder…").clicked() {
+                            self.choose(true, ctx);
+                            ui.close();
+                        }
+                        if ui.button("Refresh").clicked() {
+                            self.rescan(Vec::new());
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("Quit").clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                    ui.menu_button("Playback", |ui| {
+                        if ui.button("Play / Pause (Space)").clicked() {
+                            self.toggle_play();
+                            ui.close();
+                        }
+                        if ui.button("Stop (Esc)").clicked() {
+                            self.stop();
+                            ui.close();
+                        }
+                        if ui.button("Previous file").clicked() {
+                            self.navigate(-1);
+                            ui.close();
+                        }
+                        if ui.button("Next file").clicked() {
+                            self.navigate(1);
+                            ui.close();
+                        }
+                        if ui.button("Seek −5 s").clicked() {
+                            self.seek((self.position() - r::KEY_SEEK_SECONDS).max(0.0));
+                            ui.close();
+                        }
+                        if ui.button("Seek +5 s").clicked() {
+                            self.seek((self.position() + r::KEY_SEEK_SECONDS).min(self.duration()));
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("View", |ui| {
+                        if ui
+                            .selectable_value(&mut self.wave_channels, widgets::Channels::Both, "Waveform: Both")
+                            .clicked()
+                        {
+                            ui.close();
+                        }
+                        if ui
+                            .selectable_value(&mut self.wave_channels, widgets::Channels::Left, "Waveform: Left")
+                            .clicked()
+                        {
+                            ui.close();
+                        }
+                        if ui
+                            .selectable_value(&mut self.wave_channels, widgets::Channels::Right, "Waveform: Right")
+                            .clicked()
+                        {
+                            ui.close();
+                        }
+                        #[cfg(feature = "spectrogram")]
+                        if ui
+                            .checkbox(&mut self.spectral.enabled, "Spectrogram")
+                            .clicked()
+                        {
+                            if let Some(path) = self.browser.selected.clone() {
+                                self.request_analysis(path);
+                            }
+                            ui.close();
+                        }
+                    });
                     ui.separator();
                     ui.add_enabled_ui(self.picker.is_none(), |ui| {
                         if ui.button("+ Files").clicked() {
@@ -548,37 +624,52 @@ impl App {
                             s.state == "playing" && s.path == self.browser.selected
                         });
                         ui.horizontal(|ui| {
+                            // Symbol buttons: ⏮ previous, ▶ play, ❚❚ pause, ■ stop, ⏭ next.
                             if ui
-                                .button("|<")
+                                .button(RichText::new("⏮").size(l::BODY_FONT))
                                 .on_hover_text("Previous visible file")
                                 .clicked()
                             {
                                 self.navigate(-1);
                             }
+                            let symbol = if self.pending_play {
+                                "✕"
+                            } else if playing {
+                                "❚❚"
+                            } else {
+                                "▶"
+                            };
                             if ui
                                 .add_sized(
                                     l::PLAY_SIZE,
                                     egui::Button::new(
-                                        RichText::new(if self.pending_play {
-                                            "Cancel"
-                                        } else if playing {
-                                            "Pause"
-                                        } else {
-                                            "Play"
-                                        })
-                                        .color(Color32::BLACK)
-                                        .strong(),
+                                        RichText::new(symbol).color(Color32::BLACK).strong(),
                                     )
                                     .fill(theme::AMBER),
                                 )
+                                .on_hover_text(if self.pending_play {
+                                    "Cancel pending audition"
+                                } else if playing {
+                                    "Pause (two vertical bars)"
+                                } else {
+                                    "Play (triangle)"
+                                })
                                 .clicked()
                             {
                                 self.toggle_play();
                             }
-                            if ui.button("Stop").clicked() {
+                            if ui
+                                .button(RichText::new("■").size(l::BODY_FONT))
+                                .on_hover_text("Stop")
+                                .clicked()
+                            {
                                 self.stop();
                             }
-                            if ui.button(">|").on_hover_text("Next visible file").clicked() {
+                            if ui
+                                .button(RichText::new("⏭").size(l::BODY_FONT))
+                                .on_hover_text("Next visible file")
+                                .clicked()
+                            {
                                 self.navigate(1);
                             }
                         });
