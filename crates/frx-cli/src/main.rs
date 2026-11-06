@@ -3,7 +3,6 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use config::*;
 use frx_audio::{Command, Engine};
-use std::sync::atomic::{AtomicBool, Ordering};
 use frx_core::{
     annotations::{self, Annotation},
     catalog::{Catalog, discover_ordered},
@@ -14,6 +13,7 @@ use frx_core::{
 use frx_core::{config::DEFAULT_WAVEFORM_BINS, levels::db_to_gain};
 use serde::Serialize;
 use serde_json::json;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     io::{self, BufRead, Write},
     path::PathBuf,
@@ -187,7 +187,7 @@ fn run() -> Result<()> {
     ));
     let temporary_cache = tempfile::tempdir()?;
     let cache_path = |path: PathBuf| {
-        if path == PathBuf::from(WAVEFORM_CACHE) {
+        if path == std::path::Path::new(WAVEFORM_CACHE) {
             temporary_cache.path().to_path_buf()
         } else {
             path
@@ -289,7 +289,11 @@ fn run() -> Result<()> {
                 emit(&cache.get_channel(&path, Settings { fft_size }, channel, || false)?)?;
             }
         }
-        Action::Annotate { path, text, seconds } => {
+        Action::Annotate {
+            path,
+            text,
+            seconds,
+        } => {
             let new = if let Some(seconds) = seconds {
                 if !seconds.is_finite() || !(0.0..=MAX_SEEK_SECONDS).contains(&seconds) {
                     bail!("seconds must be finite and between 0 and {MAX_SEEK_SECONDS}");
@@ -420,15 +424,27 @@ fn session(engine: Engine) -> Result<()> {
                 }
                 Some("annotations") => {
                     let path: PathBuf = serde_json::from_value(
-                        value.get("path").cloned().context("annotations needs a path")?,
+                        value
+                            .get("path")
+                            .cloned()
+                            .context("annotations needs a path")?,
                     )?;
                     let stored = annotations::read(&path)?;
-                    vlog(format!("annotations {}: {} marker(s)", path.display(), stored.len()));
-                    emit(&json!({"ok":true, "path": path, "annotations": annotations::to_json(&stored)}))?;
+                    vlog(format!(
+                        "annotations {}: {} marker(s)",
+                        path.display(),
+                        stored.len()
+                    ));
+                    emit(
+                        &json!({"ok":true, "path": path, "annotations": annotations::to_json(&stored)}),
+                    )?;
                 }
                 Some("annotate") => {
                     let path: PathBuf = serde_json::from_value(
-                        value.get("path").cloned().context("annotate needs a path")?,
+                        value
+                            .get("path")
+                            .cloned()
+                            .context("annotate needs a path")?,
                     )?;
                     let new = if let Some(seconds) = value.get("seconds").and_then(|s| s.as_f64()) {
                         if !seconds.is_finite() || !(0.0..=MAX_SEEK_SECONDS).contains(&seconds) {
@@ -443,15 +459,20 @@ fn session(engine: Engine) -> Result<()> {
                                 .to_string(),
                         }]
                     } else {
-                        let text = value
-                            .get("text")
-                            .and_then(|t| t.as_str())
-                            .context("annotate needs text with [dd:hh:mm:ss] markers, or seconds")?;
+                        let text = value.get("text").and_then(|t| t.as_str()).context(
+                            "annotate needs text with [dd:hh:mm:ss] markers, or seconds",
+                        )?;
                         annotations::parse_text(text)?
                     };
                     let stored = annotations::annotate(&path, &new)?;
-                    vlog(format!("annotated {}: {} marker(s)", path.display(), stored.len()));
-                    emit(&json!({"ok":true, "path": path, "annotations": annotations::to_json(&stored)}))?;
+                    vlog(format!(
+                        "annotated {}: {} marker(s)",
+                        path.display(),
+                        stored.len()
+                    ));
+                    emit(
+                        &json!({"ok":true, "path": path, "annotations": annotations::to_json(&stored)}),
+                    )?;
                 }
                 _ => {
                     vlog(format!("session op: {value}"));

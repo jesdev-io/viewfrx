@@ -70,7 +70,6 @@ fn normalized_start_uses_the_same_peak_as_the_ghost_waveform() {
             max: 0.1,
         }]],
         dc_offset: vec![0.0],
-        ..Default::default()
     });
     let preview = app.waveform.as_ref().unwrap().normalization().unwrap();
     app.start_selected();
@@ -100,7 +99,6 @@ fn peak_fixture() -> Waveform {
             max: 0.1,
         }]],
         dc_offset: vec![0.0],
-        ..Default::default()
     }
 }
 
@@ -206,11 +204,22 @@ fn empty_and_populated_views_render_without_an_audio_device() {
                     2
                 ],
                 channel_peaks: vec![
-                    vec![frx_core::waveform::Peak { min: -0.5, max: 0.5 }; 2],
-                    vec![frx_core::waveform::Peak { min: -0.5, max: 0.5 }; 2],
+                    vec![
+                        frx_core::waveform::Peak {
+                            min: -0.5,
+                            max: 0.5
+                        };
+                        2
+                    ],
+                    vec![
+                        frx_core::waveform::Peak {
+                            min: -0.5,
+                            max: 0.5
+                        };
+                        2
+                    ],
                 ],
                 dc_offset: vec![0.0, 0.0],
-                ..Default::default()
             });
         }
         for size in [vec2(1280.0, 800.0), vec2(900.0, 560.0)] {
@@ -365,9 +374,10 @@ fn annotation_text_field_and_right_click_write_file_metadata_idempotently() {
     }
     deliver_file_events(&mut app, &ctx, 2);
     assert_eq!(app.annotations.len(), 2);
-    assert!(app
-        .annotations
-        .contains(&Annotation { seconds: 1.0, text: String::new() }));
+    assert!(app.annotations.contains(&Annotation {
+        seconds: 1.0,
+        text: String::new()
+    }));
     // The file still decodes and carries the markers in its tags.
     assert_eq!(frx_core::annotations::read(&path).unwrap(), app.annotations);
     // Invalid text surfaces an error and writes nothing.

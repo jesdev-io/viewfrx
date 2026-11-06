@@ -32,6 +32,19 @@ frxview play recording.wav --normalize --gain-db -6
 
 Sessions accept `play_normalized {path, peak}` and `normalize {path, peak}` operations. Supply the measured source peak from `normalization`; `normalize` with `peak: null` disables it. The path guard rejects results belonging to another current recording. Ordinary `play` resets normalization, while seeking/rate changes preserve it. This is not file-change monitoring: external edits require a new analysis/selection.
 
+
+## DC offset, anti-pop fades and the fixed highpass
+
+- Analysis reports the per-channel DC offset as a file parameter, in linear amplitude (`waveform.dc_offset`, `levels.dc_offset`) and in dBFS (`dc_offset_dbfs`, `null` for zero DC). Normalization targets the **DC-removed** sample peak, so a DC offset never steers the auto gain; the raw peak is still reported as `sample_peak`.
+- Playback always removes DC with a one-pole DC blocker (5 Hz, `frx-audio` config). A short 10 ms onset/offset gain fade is applied to the first/last source samples (and after every seek), so recording start/stop and jumps never produce a dirac-pop. The optional fixed highpass (20 Hz, `play --highpass`, session `highpass`, GUI toggle) additionally removes infra-sound. Both filters are preview-grade one-pole sections in the renderer, not room-correction DSP.
+- The GUI waveform plots the DC-removed signal (what you hear); annotation markers are drawn as vertical lines.
+
+## Timestamp annotations
+
+- Free text with `[dd:hh:mm:ss]` markers (dd = days) becomes annotations: `frxview annotate FILE "[00:00:12:00] thunder"`, or `--seconds 42 "note"` for a position marker (GUI: right-click a plot). Times canonicalize to whole seconds, matching the marker format.
+- Storage is the file's own metadata, written atomically (temp + rename) without touching audio data: WAV gets a `LIST`/`INFO` chunk with a custom `FRXA` sub-chunk inserted before `data` (where players and Symphonia read it); MP3 gets an ID3v2 `TXXX` frame (`frxview-annotations`). All other chunks/frames are preserved, so the file stays a normal playable audio file. Other formats are rejected with an error and left unmodified.
+- Merging is idempotent: identical (time, text) pairs are never duplicated, so text-field entry and right-click markers render each other. `frxview annotations FILE` (and the session op) lists them; the GUI shows them as waveform lines and in the bottom field.
+
 ## Spectrogram
 
 ```sh

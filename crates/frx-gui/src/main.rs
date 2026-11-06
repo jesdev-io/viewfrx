@@ -50,7 +50,7 @@ pub struct Args {
 fn main() -> eframe::Result {
     let mut args = Args::parse();
     let temporary_cache = tempfile::tempdir().expect("create session cache");
-    if args.cache == PathBuf::from(":temporary:") {
+    if args.cache == std::path::Path::new(":temporary:") {
         args.cache = temporary_cache.path().to_path_buf();
     }
     if args.smoke_seconds.is_some_and(|s| {
@@ -74,7 +74,10 @@ fn main() -> eframe::Result {
             }),
         ..Default::default()
     };
-    logbuf::push(format!("frxview-gui starting, args: {:?}", std::env::args().skip(1).collect::<Vec<_>>()));
+    logbuf::push(format!(
+        "frxview-gui starting, args: {:?}",
+        std::env::args().skip(1).collect::<Vec<_>>()
+    ));
     let result = eframe::run_native(
         "frxview",
         options,

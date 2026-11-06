@@ -301,7 +301,8 @@ mod tests {
             },
         )?;
         for i in 0..rate * seconds {
-            writer.write_sample(0.5 * (std::f32::consts::TAU * hz * i as f32 / rate as f32).sin())?;
+            writer
+                .write_sample(0.5 * (std::f32::consts::TAU * hz * i as f32 / rate as f32).sin())?;
         }
         writer.finalize()?;
         Ok(())
@@ -389,7 +390,10 @@ mod tests {
             }
         }
         assert_eq!(count, 16000);
-        assert!(tail_peak < 0.01, "highpass must remove DC/lows: {tail_peak}");
+        assert!(
+            tail_peak < 0.01,
+            "highpass must remove DC/lows: {tail_peak}"
+        );
         Ok(())
     }
 }

@@ -1,6 +1,6 @@
 //! Headless audio browsing primitives, shared by every frontend.
-mod cache;
 pub mod annotations;
+mod cache;
 pub mod catalog;
 pub mod config;
 pub mod decode;

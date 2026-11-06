@@ -115,11 +115,32 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
     assert_eq!(channels[1]["peaks"][0]["max"], -0.25);
     let left = success(run(
         dir.path(),
-        &["waveform", "with spaces.WAV", "--channel", "1", "--bins", "8"],
+        &[
+            "waveform",
+            "with spaces.WAV",
+            "--channel",
+            "1",
+            "--bins",
+            "8",
+        ],
     ));
     assert_eq!(left["waveform"]["channel"], 1);
-    assert!(!run(dir.path(), &["waveform", "with spaces.WAV", "--channel", "2"]).status.success());
-    assert!(!run(dir.path(), &["waveform", "with spaces.WAV", "--stereo", "--channel", "0"]).status.success());
+    assert!(
+        !run(
+            dir.path(),
+            &["waveform", "with spaces.WAV", "--channel", "2"]
+        )
+        .status
+        .success()
+    );
+    assert!(
+        !run(
+            dir.path(),
+            &["waveform", "with spaces.WAV", "--stereo", "--channel", "0"]
+        )
+        .status
+        .success()
+    );
     // A real AC signal (1 kHz sine, antiphase stereo) still normalizes to
     // -1 dBFS after DC removal.
     let mut w = hound::WavWriter::create(
@@ -133,7 +154,8 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
     )
     .unwrap();
     for i in 0..8000 {
-        let v = (0.25 * (std::f32::consts::TAU * 1000.0 * i as f32 / 8000.0).sin() * 32767.0) as i16;
+        let v =
+            (0.25 * (std::f32::consts::TAU * 1000.0 * i as f32 / 8000.0).sin() * 32767.0) as i16;
         w.write_sample(v).unwrap();
         w.write_sample(-v).unwrap();
     }
@@ -150,25 +172,42 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
     }
     for db in levels["levels"]["dc_offset_dbfs"].as_array().unwrap() {
         // Quantization leaves a negligible DC residual: null or very low dBFS.
-        match db.as_f64() {
-            Some(v) => assert!(v < -60.0, "{v}"),
-            None => {}
+        if let Some(v) = db.as_f64() {
+            assert!(v < -60.0, "{v}");
         }
     }
     // AC content passes the always-on DC blocker: ~500.0 minus the short
     // onset/offset fade at the file edges.
     let ac = success(run(
         dir.path(),
-        &["benchmark", "tone.WAV", "--sample-rate", "8000", "--rate", "2"],
+        &[
+            "benchmark",
+            "tone.WAV",
+            "--sample-rate",
+            "8000",
+            "--rate",
+            "2",
+        ],
     ));
     assert_eq!(ac["frames"], 4000);
     // 1 kHz sine at amplitude 0.25: RMS energy 4000 * 2 * (0.25^2 / 2) = 250,
     // minus only the short onset/offset fade. The DC blocker must pass it.
     let energy = ac["sum_squares"].as_f64().unwrap();
-    assert!((energy - 250.0).abs() < 10.0, "AC must pass DC blocker: {energy}");
+    assert!(
+        (energy - 250.0).abs() < 10.0,
+        "AC must pass DC blocker: {energy}"
+    );
     let hp = success(run(
         dir.path(),
-        &["benchmark", "tone.WAV", "--sample-rate", "8000", "--rate", "2", "--highpass"],
+        &[
+            "benchmark",
+            "tone.WAV",
+            "--sample-rate",
+            "8000",
+            "--rate",
+            "2",
+            "--highpass",
+        ],
     ));
     let hp_energy = hp["sum_squares"].as_f64().unwrap();
     assert!(
@@ -286,9 +325,21 @@ fn annotate_stores_timestamp_markers_in_file_metadata_idempotently() {
     let wave = success(run(dir.path(), &["waveform", file, "--bins", "8"]));
     assert_eq!(wave["waveform"]["frames"], 8000);
     // Invalid input fails without touching the file.
-    assert!(!run(dir.path(), &["annotate", file, "no marker"]).status.success());
-    assert!(!run(dir.path(), &["annotate", file, "--seconds", "-3", "x"]).status.success());
-    assert!(!run(dir.path(), &["annotations", "missing.wav"]).status.success());
+    assert!(
+        !run(dir.path(), &["annotate", file, "no marker"])
+            .status
+            .success()
+    );
+    assert!(
+        !run(dir.path(), &["annotate", file, "--seconds", "-3", "x"])
+            .status
+            .success()
+    );
+    assert!(
+        !run(dir.path(), &["annotations", "missing.wav"])
+            .status
+            .success()
+    );
 }
 
 #[test]
@@ -318,10 +369,7 @@ fn verbose_flag_pipes_console_log_lines_to_stderr() {
     let output = run(dir.path(), &["--verbose", "inspect", "with spaces.WAV"]);
     assert!(output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let logs: Vec<&str> = stderr
-        .lines()
-        .filter(|l| l.contains("\"log\""))
-        .collect();
+    let logs: Vec<&str> = stderr.lines().filter(|l| l.contains("\"log\"")).collect();
     assert!(!logs.is_empty(), "stderr: {stderr}");
     // Without --verbose, stderr stays clean on success.
     let quiet = run(dir.path(), &["inspect", "with spaces.WAV"]);

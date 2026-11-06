@@ -80,19 +80,31 @@ impl App {
                     });
                     ui.menu_button("View", |ui| {
                         if ui
-                            .selectable_value(&mut self.wave_channels, widgets::Channels::Both, "Waveform: Both")
+                            .selectable_value(
+                                &mut self.wave_channels,
+                                widgets::Channels::Both,
+                                "Waveform: Both",
+                            )
                             .clicked()
                         {
                             ui.close();
                         }
                         if ui
-                            .selectable_value(&mut self.wave_channels, widgets::Channels::Left, "Waveform: Left")
+                            .selectable_value(
+                                &mut self.wave_channels,
+                                widgets::Channels::Left,
+                                "Waveform: Left",
+                            )
                             .clicked()
                         {
                             ui.close();
                         }
                         if ui
-                            .selectable_value(&mut self.wave_channels, widgets::Channels::Right, "Waveform: Right")
+                            .selectable_value(
+                                &mut self.wave_channels,
+                                widgets::Channels::Right,
+                                "Waveform: Right",
+                            )
                             .clicked()
                         {
                             ui.close();
@@ -377,8 +389,7 @@ impl App {
             self.send(Command::Rate { value: self.rate });
         }
         ui.small(RichText::new("Rate changes pitch.").color(theme::MUTED));
-        if widgets::reset_toggle(ui, &mut self.highpass, false, "Highpass (infra-sound)")
-            .changed()
+        if widgets::reset_toggle(ui, &mut self.highpass, false, "Highpass (infra-sound)").changed()
         {
             self.send(Command::Highpass {
                 enabled: self.highpass,
@@ -426,12 +437,16 @@ impl App {
         )
         .changed()
         {
-            crate::logln!("debug console {}", if self.debug_console { "opened" } else { "closed" });
+            crate::logln!(
+                "debug console {}",
+                if self.debug_console {
+                    "opened"
+                } else {
+                    "closed"
+                }
+            );
         }
-        ui.small(
-            RichText::new("Pipes console messages into a debug window.")
-                .color(theme::MUTED),
-        );
+        ui.small(RichText::new("Pipes console messages into a debug window.").color(theme::MUTED));
     }
     pub(super) fn center(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()

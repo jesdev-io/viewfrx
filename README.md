@@ -26,12 +26,15 @@ cargo build --release --workspace --features spectrogram --locked
 ./target/release/frxview-gui
 ```
 
-- **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use **+ Files**, **+ Folder**, drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
-- **Center:** metadata, original waveform with a subdued −1 dBFS normalized overlay, optional source spectrogram, click/drag seeking and transport.
-- **Right:** output device, gain in dB, Normalize, pitch-changing rate, vertical stereo RMS/peak meters in dBFS, FFT size and spectral display floor.
+- **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use **+ Files**, **+ Folder**, the **File** menu, drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
+- **Center:** metadata cards (including the DC offset in dBFS), DC-removed waveform(s) with a subdued −1 dBFS normalized overlay, optional source spectrogram(s), click/drag seeking, right-click timestamp markers, a bottom annotation field, and symbol transport buttons (▶ play, ❚❚ pause, ■ stop, ⏮/⏭ browse).
+- **Stereo views:** waveform and spectrogram each get a **Left / Right / Both** selector and are grouped as WAVE L, WAVE R, SPEC L, SPEC R (stereo recordings only).
+- **Right:** output device, gain in dB, Normalize, pitch-changing rate, fixed highpass toggle, vertical stereo RMS/peak meters in dBFS, FFT size and spectral display floor, and a debug-console toggle.
+- **Top bar:** File / Playback / View menus export the main CLI-equivalent actions.
+- **Annotations:** type `[dd:hh:mm:ss] note` in the bottom field (Enter) or right-click a plot at a position; markers are stored in the file's own metadata (WAV LIST/INFO, MP3 ID3v2), stay playable in any player, render as vertical lines and in the field, and are idempotent.
 - **Double-click to reset:** gain returns to 0 dB/unity and unmutes; rate to 1×; toggles, device and spectral settings to their defaults. Double-click a plot to rewind.
 - **Keys:** Space play/pause; Up/Down browse visible results; Left/Right seek five seconds; Esc stop. Shortcuts do not intercept text entry.
-- **JESDEV theme:** dark compact panels, amber waveform/actions, purple playhead, bundled logo with provenance.
+- **JESDEV theme:** dark compact panels, amber waveform/actions, purple playhead, teal annotation markers, bundled logo with provenance.
 
 Sessions are stateless: opening files/folders replaces the current roots, Refresh rescans them, and nothing is restored on restart. Analysis caches are temporary by default. `--cache DIR` explicitly retains analysis artifacts for diagnostics; deprecated `--library` is ignored. Overlapping roots are deduplicated and displayed candidates are capped at 100,000, with an explicit warning. Device switches stop playback. Output failure does not prevent browsing or analysis. `--muted` starts at gain zero.
 
@@ -57,7 +60,13 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 ./target/release/frxview waveform '/path/to/recording.wav'
 ./target/release/frxview normalization '/path/to/recording.wav'
 ./target/release/frxview play '/path/to/recording.wav' --normalize --gain-db -6
+./target/release/frxview play '/path/to/recording.wav' --highpass
 ./target/release/frxview spectrogram '/path/to/recording.wav' --fft-size 2048
+./target/release/frxview levels '/path/to/recording.wav'
+./target/release/frxview waveform '/path/to/recording.wav' --stereo
+./target/release/frxview annotate '/path/to/recording.wav' '[00:00:12:00] thunder'
+./target/release/frxview annotate '/path/to/recording.wav' --seconds 42 'clap'
+./target/release/frxview annotations '/path/to/recording.wav'
 ```
 
 - Results are JSON; `list` emits one JSON object per file. Application errors go to stderr with a nonzero exit code; Clap usage errors use its standard text output.
@@ -65,7 +74,11 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 - `list` without a path browses the working directory, never a saved library. `import` only validates/emits roots; it does not retain them.
 - Waveforms use an automatically removed temporary cache; explicitly retain artifacts with `waveform --cache DIR`. `--bins` accepts powers of two from 2 to 65536. The cache budget is 64 MiB and eviction only touches frxview-owned entries.
 - Manual gain accepts linear `--gain` (0–4, 1 is unity) or `--gain-db`. Output is clamped to [-1, 1] and clipped samples are counted.
-- `--normalize` applies linked-channel sample-peak gain to reach −1 dBFS **before manual gain**. It preserves stereo balance and leaves silence unchanged. This is not loudness/true-peak normalization or DC-offset removal. The CLI computes or loads peak analysis before starting; the GUI waits without blocking its event loop and never starts normalized playback at an unanalysed gain.
+- `--normalize` applies linked-channel sample-peak gain to reach −1 dBFS **before manual gain**, computed on the **DC-removed** signal. It preserves stereo balance and leaves silence unchanged. This is not loudness/true-peak normalization. The CLI computes or loads peak analysis before starting; the GUI waits without blocking its event loop and never starts normalized playback at an unanalysed gain.
+- Playback always removes DC offset with a one-pole DC blocker and applies a short onset/offset fade (anti dirac-pop). `--highpass` additionally enables a fixed 20 Hz highpass against infra-sound. `levels` reports the per-channel DC offset in linear and dBFS, raw and DC-removed peaks, and the normalization. `benchmark --highpass` applies the same chain.
+- `waveform --channel N` / `--stereo` select per-channel overviews; `spectrogram --channel N` / `--stereo` do the same for spectral analysis.
+- `annotate` merges `[dd:hh:mm:ss]` markers (or `--seconds`) into the file's own metadata (WAV LIST INFO / MP3 ID3v2) atomically, without altering the audio data; identical annotations are never duplicated. `annotations` lists them. Both are also session ops.
+- Global `--verbose` pipes console log lines to stderr as JSON (headless counterpart of the GUI debug console).
 - `spectrogram` requires its Cargo feature. The CLI returns the same calibrated, bounded STFT overview used by the GUI; its separate 64 MiB cache is temporary unless `--cache DIR` is supplied.
 - Rate is 0.25–4 and **changes pitch**. Linear interpolation is a preview implementation, not antialiased resampling or pitch-preserving time stretching.
 - Use `--device INDEX` on `play` or `session` to choose an output. Indices come from `devices` and may change when hardware changes. The device's default sample rate/channel count is used; a small supported output buffer is requested.
@@ -87,12 +100,15 @@ Reads one JSON object per line from stdin and replies with one JSON object per l
 {"op":"pause"}
 {"op":"resume"}
 {"op":"stop"}
+{"op":"highpass","enabled":true}
+{"op":"annotate","path":"/path/to/recording.wav","text":"[00:00:12:00] thunder"}
+{"op":"annotations","path":"/path/to/recording.wav"}
 {"op":"quit"}
 ```
 
 The initial reply is `{"event":"ready","protocol":1}`. Transport commands acknowledge **acceptance, not completion**. Poll `status` to observe errors, position, and state. `generation` changes as the worker applies play/seek/rate/stop; `rendered_generation` changes when frames from that generation reach the output callback. It is not DAC/audible latency. Consecutive queued play/seek commands may coalesce. Pause and gain apply immediately; changing selection preserves pause.
 
-Use `normalization PATH` to obtain the actual source peak, then send `{"op":"play_normalized","path":"/path/to/recording.wav","peak":0.5}` with that measured peak (0.5 here is only an example). For the current file, `{"op":"normalize","path":"/path/to/recording.wav","peak":0.5}` changes normalization without a seek; `"peak":null` disables it. The path guard rejects stale analysis for a different recording. Ordinary `play` resets normalization. Manual/session `gain` remains linear for compatibility; status additionally reports gain in dB, normalization gain and per-channel RMS/peak dBFS (`null` for zero).
+Use `normalization PATH` to obtain the actual DC-removed source peak, then send `{"op":"play_normalized","path":"/path/to/recording.wav","peak":0.5}` with that measured peak (0.5 here is only an example). For the current file, `{"op":"normalize","path":"/path/to/recording.wav","peak":0.5}` changes normalization without a seek; `"peak":null` disables it. The path guard rejects stale analysis for a different recording. Ordinary `play` resets normalization. Manual/session `gain` remains linear for compatibility; status additionally reports gain in dB, normalization gain, the highpass state and per-channel RMS/peak dBFS (`null` for zero).
 
 A missing/corrupt file produces an asynchronous error in status; a later successful play clears it. Device stream failures require reopening the session. Invalid commands produce an error reply without ending the session. Requests are limited to 64 KiB. EOF or `quit` stops the engine; **piping play then immediately quit does not wait for playback**. Use the one-shot `play` command for that.
 
@@ -129,7 +145,7 @@ Unit/integration tests do not require an audio device. WAV fixtures are generate
 
 ## Current limitations
 
-- A separate magnitude-spectrum panel, annotation editing, waveform zoom and persisted preferences remain work. The meter has a 300 ms exponential RMS envelope and decaying sample peaks; it is VU-style, **not an IEC-calibrated VU instrument**.
+- A separate magnitude-spectrum panel, waveform zoom and persisted preferences remain work. The meter has a 300 ms exponential RMS envelope and decaying sample peaks; it is VU-style, **not an IEC-calibrated VU instrument**. Annotation metadata writing supports WAV and MP3; other formats report a clear error and are left untouched.
 - Spectrograms are bounded, linearly spaced frequency overviews with maximum aggregation, not a zoomable analysis editor or power spectral density measurement.
 - Playback supports mono/stereo; multichannel metadata/waveforms work, but auditioning >2 channels is rejected. Extra device channels are silent.
 - WAV and MP3 are tested. Other Symphonia-enabled formats may work but are not yet qualified. A truncated stream ending at a valid packet boundary may look like normal EOF; this is not an audio-file integrity checker.

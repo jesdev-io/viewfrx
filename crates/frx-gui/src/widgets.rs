@@ -187,8 +187,7 @@ pub fn annotation_lines(
         return;
     }
     for annotation in annotations {
-        let x = rect.left()
-            + (annotation.seconds / duration).clamp(0.0, 1.0) as f32 * rect.width();
+        let x = rect.left() + (annotation.seconds / duration).clamp(0.0, 1.0) as f32 * rect.width();
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
             Stroke::new(l::THIN_STROKE, theme::ANNOTATION),

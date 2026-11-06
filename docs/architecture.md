@@ -2,7 +2,7 @@
 
 ## Boundaries
 
-- `frx-core`: filesystem discovery, streaming decoding/probing, level/normalization conventions, cached waveform and optional spectral analysis. No device, UI, or argument-parsing dependencies.
+- `frx-core`: filesystem discovery, streaming decoding/probing, level/normalization conventions, timestamp annotations in file metadata, cached waveform and optional spectral analysis. No device, UI, or argument-parsing dependencies.
 - `frx-audio`: typed transport commands, streaming preview engine, CPAL device adapter. No CLI or UI dependencies.
 - `frx-cli`: Clap and JSON-lines adapters.
 - `frx-gui`: egui views and background adapters over the same Rust APIs, never subprocess playback.
@@ -13,7 +13,7 @@ Four focused crates, not a generic plugin/command framework.
 
 Disk access, seeking and decoding belong on a producer thread. CPAL consumes a bounded SPSC ring; the callback never takes a mutex, reads a file, decodes, logs, or allocates. Atomics hold transport flags and telemetry. Each buffered frame carries a generation: old audio is discarded after seek/switch/stop. Command submission is bounded and reports overload rather than blocking. Worker errors are visible in status. Shutdown joins the worker (local filesystem I/O can still delay shutdown).
 
-Rate adjustment changes pitch and duration together. The first preview renderer uses linear interpolation, not mastering-quality antialiased resampling or pitch-preserving time stretching. These are explicit follow-up DSP tasks, not silently interchangeable features. Mono is duplicated; stereo is preserved; >2-channel sources are rejected until a documented channel-layout/downmix policy exists. Extra output channels are silent.
+The renderer always removes DC offset (one-pole DC blocker), applies a short onset/offset fade, and optionally a fixed infra-sound highpass (`Highpass` command; status reports it). Rate adjustment changes pitch and duration together. The first preview renderer uses linear interpolation, not mastering-quality antialiased resampling or pitch-preserving time stretching. These are explicit follow-up DSP tasks, not silently interchangeable features. Mono is duplicated; stereo is preserved; >2-channel sources are rejected until a documented channel-layout/downmix policy exists. Extra output channels are silent.
 
 Seek/switch invalidates buffered playback when the worker applies the queued command. Manual gain, normalization gain and pause are callback-side atomics; selecting a file preserves the pause flag. Consecutive queued seeks/plays are coalesced, but an in-flight filesystem read cannot be cancelled. Status position is the last rendered source frame (or the pending seek target), not the decoder's ahead-of-playback position; it excludes hardware latency. `rendered_generation` distinguishes applied commands from audio actually reaching the callback. An underrun counter counts callback shortages while decoding is active, including seek/switch transition gaps, but not natural EOF.
 

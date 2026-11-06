@@ -495,9 +495,8 @@ impl FileService {
                     thread::sleep(Duration::from_millis(POLL_MS));
                     continue;
                 };
-                let cancelled = || {
-                    stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != job.id
-                };
+                let cancelled =
+                    || stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != job.id;
                 let result = annotations::annotate(&job.path, &job.new).map_err(|e| {
                     logln!("annotation write to {} failed: {e:#}", job.path.display());
                     format!("{e:#}")

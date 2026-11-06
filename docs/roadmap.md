@@ -16,7 +16,7 @@
 2. **Scheduling:** remove measured transition shortages through proper preparation/swap, cancellable/priority work, next-file preloading; stress-test rapid random seek/switch and shutdown on slow media. Keep memory/queue bounds explicit.
 3. **Command completion:** operation IDs and completion events so clients can await their own request rather than infer completion from generations. Stable device identifiers, output rate/buffer configuration, persisted settings, device reconnection.
 4. **Library/analysis:** progressive multiresolution waveforms, cache concurrency/version migration tests, metadata caching and source-change detection. GUI scan/analysis cancellation and bounded, deduplicated browsing are implemented; cancellation during blocked OS reads remains limited.
-5. **Headless feature parity:** editable sidecar annotations, a separate magnitude-spectrum view, offline render/export for numerical/audio comparisons. Shared stereo RMS/peak ballistics, peak normalization and feature-gated configurable STFT analysis are implemented. No source metadata writes until format-specific safety and backup policy is agreed.
+5. **Headless feature parity:** a separate magnitude-spectrum view, offline render/export for numerical/audio comparisons. Shared stereo RMS/peak ballistics, peak normalization and feature-gated configurable STFT analysis are implemented. No source metadata writes until format-specific safety and backup policy is agreed.
 6. **Coverage:** more sample formats/rates, corrupt/truncated files, large metadata, empty sources, realistic BWF field recordings, high-channel-count audio, device loss and sustained load. Confirm all enabled codecs and selected crate features/licenses.
 
 ## Delivered: initial GUI
@@ -35,6 +35,15 @@
 - Optional `spectrogram` feature across core/CLI/GUI: bounded cached streaming Hann STFT, configurable FFT size/display floor, calibrated source levels and background color conversion.
 - Centralized production tuning/layout constants; source data is never modified.
 - Debug/release tests with feature coverage, muted normalization/device checks and native spectral screenshots. See [analysis.md](analysis.md).
+
+## Delivered: requirements round (DSP, channels, annotations, debug, menu)
+
+- DC offset reported in dBFS as a file parameter and removed during playback (DC blocker); normalization uses the DC-removed peak.
+- Short onset/offset anti-pop fades; optional fixed 20 Hz highpass toggle (CLI `play --highpass`, session `highpass`, GUI toggle).
+- Left/Right/Both selection for waveform and spectrogram, grouped as wave L/R and spec L/R; CLI `waveform/spectrogram --channel/--stereo`.
+- Timestamp annotations in the [dd:hh:mm:ss] format stored in WAV/MP3 file metadata (atomic, non-destructive, idempotent); CLI `annotate`/`annotations` plus session ops; GUI text field + right-click markers + plot lines.
+- Symbol transport buttons, top-bar menu exporting main CLI actions, debug console window (GUI) and `--verbose` log lines (CLI).
+- Stateless sessions: no catalog persistence, temporary default analysis caches.
 
 ## Next GUI work
 

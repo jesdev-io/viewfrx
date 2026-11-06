@@ -10,11 +10,7 @@
 use crate::decode::AudioReader;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    io::Write,
-    path::Path,
-};
+use std::{fs, io::Write, path::Path};
 
 /// Custom RIFF INFO sub-chunk fourcc for frxview annotations.
 pub const WAV_ANNOTATION_CHUNK: &[u8; 4] = b"FRXA";
@@ -29,7 +25,11 @@ pub struct Annotation {
 
 /// `[dd:hh:mm:ss]` where dd = days, hh < 24, mm/ss < 60.
 pub fn format_timestamp(seconds: f64) -> String {
-    let total = if seconds.is_finite() { seconds.max(0.0) } else { 0.0 };
+    let total = if seconds.is_finite() {
+        seconds.max(0.0)
+    } else {
+        0.0
+    };
     let whole = total as u64;
     let days = whole / 86_400;
     let hours = (whole / 3_600) % 24;
@@ -42,7 +42,10 @@ pub fn format_timestamp(seconds: f64) -> String {
 pub fn parse_timestamp(token: &str) -> Option<f64> {
     let inner = token.strip_prefix('[')?.strip_suffix(']')?;
     let parts: Vec<&str> = inner.split(':').collect();
-    if parts.len() != 4 || parts.iter().any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()))
+    if parts.len() != 4
+        || parts
+            .iter()
+            .any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()))
     {
         return None;
     }
@@ -63,20 +66,19 @@ pub fn parse_text(input: &str) -> Result<Vec<Annotation>> {
     let bytes = input.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'[' {
-            if let Some(end) = input[i..].find(']').map(|e| i + e) {
-                if let Some(seconds) = parse_timestamp(&input[i..=end]) {
-                    let text_start = end + 1;
-                    let text_end = input[text_start..]
-                        .find('[')
-                        .map(|p| text_start + p)
-                        .unwrap_or(input.len());
-                    let text = input[text_start..text_end].trim().to_string();
-                    found.push(Annotation { seconds, text });
-                    i = text_end;
-                    continue;
-                }
-            }
+        if bytes[i] == b'['
+            && let Some(end) = input[i..].find(']').map(|e| i + e)
+            && let Some(seconds) = parse_timestamp(&input[i..=end])
+        {
+            let text_start = end + 1;
+            let text_end = input[text_start..]
+                .find('[')
+                .map(|p| text_start + p)
+                .unwrap_or(input.len());
+            let text = input[text_start..text_end].trim().to_string();
+            found.push(Annotation { seconds, text });
+            i = text_end;
+            continue;
         }
         i += 1;
     }
@@ -144,7 +146,10 @@ pub fn read(path: &Path) -> Result<Vec<Annotation>> {
 /// Add annotations to a file (merged idempotently) and store them in the
 /// file's metadata without altering the audio data.
 pub fn annotate(path: &Path, new: &[Annotation]) -> Result<Vec<Annotation>> {
-    if new.iter().any(|a| !a.seconds.is_finite() || a.seconds < 0.0) {
+    if new
+        .iter()
+        .any(|a| !a.seconds.is_finite() || a.seconds < 0.0)
+    {
         bail!("annotation time must be finite and non-negative");
     }
     let mut annotations = read(path)?;
@@ -158,7 +163,9 @@ pub fn write(path: &Path, annotations: &[Annotation]) -> Result<()> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     let updated = if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
         write_wav(&bytes, annotations)?
-    } else if path.extension().is_some_and(|e| e.to_ascii_lowercase() == "mp3")
+    } else if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("mp3"))
         || bytes.starts_with(b"ID3")
         || bytes.first().is_some_and(|b| *b == 0xFF)
     {
@@ -170,7 +177,10 @@ pub fn write(path: &Path, annotations: &[Annotation]) -> Result<()> {
         );
     };
     // Atomic replace: readers either see the old or the new file, never a mix.
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     temp.write_all(&updated)?;
     temp.flush()?;
@@ -191,7 +201,10 @@ fn riff_chunks(bytes: &[u8]) -> Result<Vec<([u8; 4], Vec<u8>)>> {
         let id: [u8; 4] = bytes[pos..pos + 4].try_into().unwrap();
         let size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
         let start = pos + 8;
-        let end = start.checked_add(size).filter(|e| *e <= bytes.len()).with_context(|| "truncated RIFF chunk")?;
+        let end = start
+            .checked_add(size)
+            .filter(|e| *e <= bytes.len())
+            .with_context(|| "truncated RIFF chunk")?;
         chunks.push((id, bytes[start..end].to_vec()));
         pos = start + pad2(size);
     }
@@ -201,7 +214,7 @@ fn riff_chunks(bytes: &[u8]) -> Result<Vec<([u8; 4], Vec<u8>)>> {
     Ok(chunks)
 }
 
-fn build_list_info(subchunks: &[( [u8; 4], Vec<u8> )]) -> Vec<u8> {
+fn build_list_info(subchunks: &[([u8; 4], Vec<u8>)]) -> Vec<u8> {
     let mut list = b"INFO".to_vec();
     for (id, data) in subchunks {
         list.extend_from_slice(id);
@@ -217,7 +230,11 @@ fn build_list_info(subchunks: &[( [u8; 4], Vec<u8> )]) -> Vec<u8> {
 fn write_wav(bytes: &[u8], annotations: &[Annotation]) -> Result<Vec<u8>> {
     let mut chunks = riff_chunks(bytes)?;
     let payload = format_annotations(annotations);
-    let frxa = if payload.is_empty() { None } else { Some(payload.into_bytes()) };
+    let frxa = if payload.is_empty() {
+        None
+    } else {
+        Some(payload.into_bytes())
+    };
     let mut inserted = false;
     for (id, data) in chunks.iter_mut() {
         if id == b"LIST" && data.starts_with(b"INFO") {
@@ -228,7 +245,10 @@ fn write_wav(bytes: &[u8], annotations: &[Annotation]) -> Result<Vec<u8>> {
                 let sub_id: [u8; 4] = data[pos..pos + 4].try_into().unwrap();
                 let size = u32::from_le_bytes(data[pos + 4..pos + 8].try_into().unwrap()) as usize;
                 let start = pos + 8;
-                let end = start.checked_add(size).filter(|e| *e <= data.len()).with_context(|| "truncated INFO sub-chunk")?;
+                let end = start
+                    .checked_add(size)
+                    .filter(|e| *e <= data.len())
+                    .with_context(|| "truncated INFO sub-chunk")?;
                 if &sub_id != WAV_ANNOTATION_CHUNK {
                     subchunks.push((sub_id, data[start..end].to_vec()));
                 }
@@ -241,16 +261,14 @@ fn write_wav(bytes: &[u8], annotations: &[Annotation]) -> Result<Vec<u8>> {
             inserted = true;
         }
     }
-    if !inserted {
-        if let Some(payload) = frxa {
-            let list = build_list_info(&[(*WAV_ANNOTATION_CHUNK, payload)]);
-            // Insert before the data chunk so metadata readers actually see it.
-            let data_pos = chunks
-                .iter()
-                .position(|(id, _)| id == b"data")
-                .context("WAV file has no data chunk")?;
-            chunks.insert(data_pos, (*b"LIST", list));
-        }
+    if !inserted && let Some(payload) = frxa {
+        let list = build_list_info(&[(*WAV_ANNOTATION_CHUNK, payload)]);
+        // Insert before the data chunk so metadata readers actually see it.
+        let data_pos = chunks
+            .iter()
+            .position(|(id, _)| id == b"data")
+            .context("WAV file has no data chunk")?;
+        chunks.insert(data_pos, (*b"LIST", list));
     }
     let mut out = b"RIFF".to_vec();
     let body: usize = 4 + chunks.iter().map(|(_, d)| 8 + pad2(d.len())).sum::<usize>();
@@ -277,7 +295,9 @@ fn syncsafe(value: u32) -> [u8; 4] {
 }
 
 fn from_syncsafe(bytes: &[u8]) -> u32 {
-    bytes.iter().fold(0u32, |acc, b| (acc << 7) | (b & 0x7F) as u32)
+    bytes
+        .iter()
+        .fold(0u32, |acc, b| (acc << 7) | (b & 0x7F) as u32)
 }
 
 fn txxx_frame(text: &str) -> Vec<u8> {
@@ -360,7 +380,10 @@ fn parse_id3_frames(mut data: &[u8], version: u8) -> Result<Vec<([u8; 4], Vec<u8
             u32::from_be_bytes(data[4..8].try_into().unwrap()) as usize
         };
         let start: usize = 10;
-        let end = start.checked_add(size).filter(|e| *e <= data.len()).context("truncated ID3 frame")?;
+        let end = start
+            .checked_add(size)
+            .filter(|e| *e <= data.len())
+            .context("truncated ID3 frame")?;
         frames.push((id, data[start..end].to_vec()));
         data = &data[end..];
     }
@@ -374,7 +397,6 @@ pub fn to_json(annotations: &[Annotation]) -> Vec<serde_json::Value> {
         .map(|a| serde_json::json!({"seconds": a.seconds, "timestamp": format_timestamp(a.seconds), "text": a.text}))
         .collect()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -403,7 +425,10 @@ mod tests {
     fn timestamp_parse_and_format_round_trip() {
         assert_eq!(parse_timestamp("[00:00:00:00]"), Some(0.0));
         assert_eq!(parse_timestamp("[00:00:01:30]"), Some(90.0));
-        assert_eq!(parse_timestamp("[01:02:03:04]"), Some((((24 + 2) * 60 + 3) * 60 + 4) as f64));
+        assert_eq!(
+            parse_timestamp("[01:02:03:04]"),
+            Some((((24 + 2) * 60 + 3) * 60 + 4) as f64)
+        );
         assert_eq!(parse_timestamp("[00:24:00:00]"), None);
         assert_eq!(parse_timestamp("[00:00:60:00]"), None);
         assert_eq!(parse_timestamp("[00:00:00]"), None);
@@ -418,28 +443,52 @@ mod tests {
         assert_eq!(
             parsed,
             vec![
-                Annotation { seconds: 60.0, text: "thunder".into() },
-                Annotation { seconds: 7200.0, text: "rain starts later".into() },
+                Annotation {
+                    seconds: 60.0,
+                    text: "thunder".into()
+                },
+                Annotation {
+                    seconds: 7200.0,
+                    text: "rain starts later".into()
+                },
             ]
         );
-        assert_eq!(format_annotations(&parsed), "[00:00:01:00] thunder\n[00:02:00:00] rain starts later");
+        assert_eq!(
+            format_annotations(&parsed),
+            "[00:00:01:00] thunder\n[00:02:00:00] rain starts later"
+        );
         assert!(parse_text("no marker here").is_err());
         Ok(())
     }
 
     #[test]
     fn merge_is_idempotent_and_sorted() {
-        let mut existing = vec![Annotation { seconds: 5.0, text: "b".into() }];
+        let mut existing = vec![Annotation {
+            seconds: 5.0,
+            text: "b".into(),
+        }];
         let new = vec![
-            Annotation { seconds: 5.0, text: "b".into() },
-            Annotation { seconds: 1.0, text: "a".into() },
+            Annotation {
+                seconds: 5.0,
+                text: "b".into(),
+            },
+            Annotation {
+                seconds: 1.0,
+                text: "a".into(),
+            },
         ];
         merge(&mut existing, &new);
         assert_eq!(
             existing,
             vec![
-                Annotation { seconds: 1.0, text: "a".into() },
-                Annotation { seconds: 5.0, text: "b".into() },
+                Annotation {
+                    seconds: 1.0,
+                    text: "a".into()
+                },
+                Annotation {
+                    seconds: 5.0,
+                    text: "b".into()
+                },
             ]
         );
     }
@@ -451,8 +500,14 @@ mod tests {
         wav_fixture(&path, 800)?;
         let original = fs::read(&path)?;
         let added = vec![
-            Annotation { seconds: 1.0, text: "first".into() },
-            Annotation { seconds: 60.0, text: String::new() },
+            Annotation {
+                seconds: 1.0,
+                text: "first".into(),
+            },
+            Annotation {
+                seconds: 60.0,
+                text: String::new(),
+            },
         ];
         let stored = annotate(&path, &added)?;
         assert_eq!(stored, added);
@@ -462,7 +517,11 @@ mod tests {
         assert_eq!(fs::read(&path)?, fs::read(&path)?);
         let size_once = fs::metadata(&path)?.len();
         annotate(&path, &added)?;
-        assert_eq!(fs::metadata(&path)?.len(), size_once, "repeat write must not grow the file");
+        assert_eq!(
+            fs::metadata(&path)?.len(),
+            size_once,
+            "repeat write must not grow the file"
+        );
         // Still a normal audio file: decodes to the same number of frames.
         let mut reader = AudioReader::open(&path)?;
         assert_eq!(reader.info().frames, Some(800));
@@ -475,12 +534,16 @@ mod tests {
         // Audio data untouched: original file's data chunk is still there verbatim.
         let now = fs::read(&path)?;
         assert!(now.len() > original.len());
-        assert!(now.windows(original.len()).any(|w| w == original.as_slice()) || {
-            // data chunk bytes are preserved inside the rewritten file
-            let chunks = riff_chunks(&now)?;
-            let data = chunks.iter().find(|(id, _)| id == b"data").unwrap();
-            data.1.len() == 800 * 4
-        });
+        assert!(
+            now.windows(original.len())
+                .any(|w| w == original.as_slice())
+                || {
+                    // data chunk bytes are preserved inside the rewritten file
+                    let chunks = riff_chunks(&now)?;
+                    let data = chunks.iter().find(|(id, _)| id == b"data").unwrap();
+                    data.1.len() == 800 * 4
+                }
+        );
         // Read back through metadata tags.
         assert_eq!(read(&path)?, added);
         // New annotation merges with existing ones; sub-second times
@@ -489,12 +552,21 @@ mod tests {
         let more = annotate(
             &path,
             &[
-                Annotation { seconds: 3.0, text: "x".into() },
-                Annotation { seconds: 2.4, text: "r".into() },
+                Annotation {
+                    seconds: 3.0,
+                    text: "x".into(),
+                },
+                Annotation {
+                    seconds: 2.4,
+                    text: "r".into(),
+                },
             ],
         )?;
         assert_eq!(more.len(), 4);
-        assert!(more.contains(&Annotation { seconds: 2.0, text: "r".into() }));
+        assert!(more.contains(&Annotation {
+            seconds: 2.0,
+            text: "r".into()
+        }));
         Ok(())
     }
 
@@ -504,12 +576,15 @@ mod tests {
         let path = dir.path().join("b.wav");
         wav_fixture(&path, 100)?;
         // Manually insert a LIST INFO ICMT chunk before data.
-        let mut bytes = fs::read(&path)?;
+        let bytes = fs::read(&path)?;
         let chunks = riff_chunks(&bytes)?;
         let data_pos = chunks.iter().position(|(id, _)| id == b"data").unwrap();
         let mut list = build_list_info(&[(*b"ICMT", b"user comment".to_vec())]);
         let mut out = b"RIFF".to_vec();
-        let body = 4 + (chunks.len() + 1) * 8 + chunks.iter().map(|(_, d)| pad2(d.len())).sum::<usize>() + pad2(list.len());
+        let body = 4
+            + (chunks.len() + 1) * 8
+            + chunks.iter().map(|(_, d)| pad2(d.len())).sum::<usize>()
+            + pad2(list.len());
         out.extend_from_slice(&(body as u32).to_le_bytes());
         out.extend_from_slice(b"WAVE");
         for (i, (id, data)) in chunks.iter().enumerate() {
@@ -530,11 +605,18 @@ mod tests {
         }
         fs::write(&path, &out)?;
         list.clear();
-        let stored = annotate(&path, &[Annotation { seconds: 1.0, text: "note".into() }])?;
+        let stored = annotate(
+            &path,
+            &[Annotation {
+                seconds: 1.0,
+                text: "note".into(),
+            }],
+        )?;
         assert_eq!(stored.len(), 1);
         let tags = AudioReader::open(&path)?.info().tags.clone();
         assert!(
-            tags.iter().any(|(k, v)| k == "Comment" && v == "user comment"),
+            tags.iter()
+                .any(|(k, v)| k == "Comment" && v == "user comment"),
             "existing INFO tags must survive: {tags:?}"
         );
         assert_eq!(from_tags(&tags), stored);
@@ -546,7 +628,10 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("tone.mp3");
         fs::write(&path, include_bytes!("../tests/fixtures/tone.mp3"))?;
-        let added = vec![Annotation { seconds: 1.0, text: "marker".into() }];
+        let added = vec![Annotation {
+            seconds: 1.0,
+            text: "marker".into(),
+        }];
         let stored = annotate(&path, &added)?;
         assert_eq!(stored, added);
         let size_once = fs::metadata(&path)?.len();
@@ -571,9 +656,27 @@ mod tests {
         let path = dir.path().join("a.flac");
         fs::write(&path, b"fLaC....")?;
         let before = fs::read(&path)?;
-        assert!(annotate(&path, &[Annotation { seconds: 1.0, text: "x".into() }]).is_err());
+        assert!(
+            annotate(
+                &path,
+                &[Annotation {
+                    seconds: 1.0,
+                    text: "x".into()
+                }]
+            )
+            .is_err()
+        );
         assert_eq!(fs::read(&path)?, before);
-        assert!(annotate(&path, &[Annotation { seconds: -1.0, text: "x".into() }]).is_err());
+        assert!(
+            annotate(
+                &path,
+                &[Annotation {
+                    seconds: -1.0,
+                    text: "x".into()
+                }]
+            )
+            .is_err()
+        );
         Ok(())
     }
 }
