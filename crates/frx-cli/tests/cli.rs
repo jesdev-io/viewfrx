@@ -246,6 +246,52 @@ fn spectrogram_cli_is_calibrated_cached_and_validates_fft_size() {
 }
 
 #[test]
+fn annotate_stores_timestamp_markers_in_file_metadata_idempotently() {
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let file = "with spaces.WAV";
+    // Text-field style: [dd:hh:mm:ss] free text.
+    let first = success(run(
+        dir.path(),
+        &["annotate", file, "[00:00:00:05] thunder starts"],
+    ));
+    let list = first["annotations"].as_array().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["seconds"], 5.0);
+    assert_eq!(list[0]["timestamp"], "[00:00:00:05]");
+    assert_eq!(list[0]["text"], "thunder starts");
+    // Right-click style: explicit position; same position twice is idempotent.
+    let second = success(run(
+        dir.path(),
+        &["annotate", file, "--seconds", "42", "clap"],
+    ));
+    assert_eq!(second["annotations"].as_array().unwrap().len(), 2);
+    let again = success(run(
+        dir.path(),
+        &["annotate", file, "--seconds", "42", "clap"],
+    ));
+    assert_eq!(again["annotations"].as_array().unwrap().len(), 2);
+    // Re-entering the same text line does not duplicate either.
+    let repeat = success(run(
+        dir.path(),
+        &["annotate", file, "[00:00:00:05] thunder starts"],
+    ));
+    assert_eq!(repeat["annotations"].as_array().unwrap().len(), 2);
+    // Listing reads them back from the file metadata.
+    let listed = success(run(dir.path(), &["annotations", file]));
+    assert_eq!(listed["annotations"], repeat["annotations"]);
+    // The file is still a normal audio file: inspect and waveform still work.
+    let info = success(run(dir.path(), &["inspect", file]));
+    assert_eq!(info["sample_rate"], 8000);
+    let wave = success(run(dir.path(), &["waveform", file, "--bins", "8"]));
+    assert_eq!(wave["waveform"]["frames"], 8000);
+    // Invalid input fails without touching the file.
+    assert!(!run(dir.path(), &["annotate", file, "no marker"]).status.success());
+    assert!(!run(dir.path(), &["annotate", file, "--seconds", "-3", "x"]).status.success());
+    assert!(!run(dir.path(), &["annotations", "missing.wav"]).status.success());
+}
+
+#[test]
 fn bad_files_and_invalid_arguments_fail_without_panics() {
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());

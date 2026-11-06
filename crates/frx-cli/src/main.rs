@@ -4,7 +4,9 @@ use clap::{Parser, Subcommand};
 use config::*;
 use frx_audio::{Command, Engine};
 use frx_core::{
+    annotations::{self, Annotation},
     catalog::{Catalog, discover_ordered},
+    config::MAX_SEEK_SECONDS,
     decode::inspect,
     waveform::WaveformCache,
 };
@@ -92,6 +94,18 @@ enum Action {
         #[arg(long)]
         stereo: bool,
     },
+    /// Add timestamp annotations to a file's own metadata (WAV/MP3), without
+    /// altering the audio. Idempotent: identical annotations are not duplicated.
+    Annotate {
+        path: PathBuf,
+        /// Free text containing [dd:hh:mm:ss] markers, e.g. "[00:00:12:00] thunder".
+        text: Option<String>,
+        /// Place the annotation at this time (seconds) instead of parsing markers.
+        #[arg(long)]
+        seconds: Option<f64>,
+    },
+    /// List the timestamp annotations stored in a file's metadata.
+    Annotations { path: PathBuf },
     /// List current output devices (indices are session-local, not persistent IDs).
     Devices,
     /// Play one file until EOF (or --seconds). Rate changes pitch.
@@ -257,6 +271,27 @@ fn run() -> Result<()> {
                 emit(&cache.get_channel(&path, Settings { fft_size }, channel, || false)?)?;
             }
         }
+        Action::Annotate { path, text, seconds } => {
+            let new = if let Some(seconds) = seconds {
+                if !seconds.is_finite() || !(0.0..=MAX_SEEK_SECONDS).contains(&seconds) {
+                    bail!("seconds must be finite and between 0 and {MAX_SEEK_SECONDS}");
+                }
+                vec![Annotation {
+                    seconds,
+                    text: text.unwrap_or_default(),
+                }]
+            } else {
+                annotations::parse_text(
+                    &text.context("provide TEXT with [dd:hh:mm:ss] markers, or use --seconds")?,
+                )?
+            };
+            let stored = annotations::annotate(&path, &new)?;
+            emit(&json!({"path": path, "annotations": annotations::to_json(&stored)}))?;
+        }
+        Action::Annotations { path } => {
+            let stored = annotations::read(&path)?;
+            emit(&json!({"path": path, "annotations": annotations::to_json(&stored)}))?;
+        }
         Action::Devices => emit(&frx_audio::devices()?)?,
         Action::Play {
             path,
@@ -364,6 +399,39 @@ fn session(engine: Engine) -> Result<()> {
                 Some("quit") if value.as_object().is_some_and(|o| o.len() == 1) => {
                     emit(&json!({"ok":true}))?;
                     return Ok(false);
+                }
+                Some("annotations") => {
+                    let path: PathBuf = serde_json::from_value(
+                        value.get("path").cloned().context("annotations needs a path")?,
+                    )?;
+                    let stored = annotations::read(&path)?;
+                    emit(&json!({"ok":true, "path": path, "annotations": annotations::to_json(&stored)}))?;
+                }
+                Some("annotate") => {
+                    let path: PathBuf = serde_json::from_value(
+                        value.get("path").cloned().context("annotate needs a path")?,
+                    )?;
+                    let new = if let Some(seconds) = value.get("seconds").and_then(|s| s.as_f64()) {
+                        if !seconds.is_finite() || !(0.0..=MAX_SEEK_SECONDS).contains(&seconds) {
+                            bail!("seconds must be finite and between 0 and {MAX_SEEK_SECONDS}");
+                        }
+                        vec![Annotation {
+                            seconds,
+                            text: value
+                                .get("text")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                        }]
+                    } else {
+                        let text = value
+                            .get("text")
+                            .and_then(|t| t.as_str())
+                            .context("annotate needs text with [dd:hh:mm:ss] markers, or seconds")?;
+                        annotations::parse_text(text)?
+                    };
+                    let stored = annotations::annotate(&path, &new)?;
+                    emit(&json!({"ok":true, "path": path, "annotations": annotations::to_json(&stored)}))?;
                 }
                 _ => {
                     engine.execute(serde_json::from_value(value)?)?;
