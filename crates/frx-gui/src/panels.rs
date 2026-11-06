@@ -301,6 +301,17 @@ impl App {
             self.send(Command::Rate { value: self.rate });
         }
         ui.small(RichText::new("Rate changes pitch.").color(theme::MUTED));
+        if widgets::reset_toggle(ui, &mut self.highpass, false, "Highpass (infra-sound)")
+            .changed()
+        {
+            self.send(Command::Highpass {
+                enabled: self.highpass,
+            });
+        }
+        ui.small(
+            RichText::new("Fixed highpass removes infra-sound; DC offset is always removed.")
+                .color(theme::MUTED),
+        );
         ui.separator();
         ui.label("STEREO LEVEL · dBFS");
         widgets::stereo_meter(ui, self.snapshot.status.as_ref());
@@ -379,15 +390,31 @@ impl App {
                             let peak = self.waveform.as_ref().map_or("…".into(), |w| {
                                 format!(
                                     "{} dBFS",
-                                    widgets::db_label(amplitude_dbfs(w.sample_peak()))
+                                    widgets::db_label(amplitude_dbfs(w.dc_removed_sample_peak()))
                                 )
+                            });
+                            // DC offset is listed as a file parameter in dBFS; it is
+                            // removed during playback and excluded from normalization.
+                            let dc = self.waveform.as_ref().map_or("…".into(), |w| {
+                                let worst = w
+                                    .dc_offset_dbfs()
+                                    .into_iter()
+                                    .flatten()
+                                    .fold(None::<f32>, |a, b| {
+                                        Some(match a {
+                                            Some(a) => a.max(b),
+                                            None => b,
+                                        })
+                                    });
+                                widgets::db_label(worst)
                             });
                             ui.horizontal_wrapped(|ui| {
                                 for (label, value) in [
                                     ("DURATION", clock(self.duration())),
                                     ("SAMPLE RATE", format!("{} Hz", info.sample_rate)),
                                     ("CHANNELS", info.channels.to_string()),
-                                    ("SOURCE PEAK", peak),
+                                    ("PEAK (DC-REMOVED)", peak),
+                                    ("DC OFFSET", format!("{dc} dBFS")),
                                 ] {
                                     egui::Frame::new()
                                         .fill(theme::PANEL)
@@ -486,6 +513,7 @@ impl App {
                                 duration,
                                 wave_height / channels.len() as f32,
                                 Some(ch),
+                                &self.annotations,
                             );
                             self.handle_seek(response);
                         }
@@ -501,6 +529,7 @@ impl App {
                                     total_height * l::SPECTRAL_HEIGHT_FRACTION
                                         / channels.len() as f32,
                                     ch,
+                                    &self.annotations,
                                 );
                                 self.handle_seek(response);
                             }
@@ -554,9 +583,33 @@ impl App {
                             }
                         });
                         ui.small(
-                            RichText::new("Click/drag to seek. Double-click a plot to rewind.")
-                                .color(theme::MUTED),
+                            RichText::new(
+                                "Click/drag to seek. Right-click a plot to add a timestamp marker. Double-click a plot to rewind.",
+                            )
+                            .color(theme::MUTED),
                         );
+                        ui.add_space(l::SPACE_SMALL);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("ANNOTATIONS")
+                                    .size(l::MICRO_FONT)
+                                    .color(theme::ANNOTATION),
+                            );
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut self.annotation_text)
+                                    .hint_text("[dd:hh:mm:ss] free text — Enter adds it to the file's metadata")
+                                    .desired_width(f32::INFINITY),
+                            );
+                            if response.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                self.submit_annotation_text();
+                            }
+                            response.on_hover_text(format!(
+                                "{} marker(s) stored in this file. Right-click a plot to mark the playhead position.",
+                                self.annotations.len()
+                            ));
+                        });
                     });
             });
     }

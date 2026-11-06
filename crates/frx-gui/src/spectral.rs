@@ -6,6 +6,7 @@ use crate::{
 };
 use eframe::egui::{self, Color32, Sense, pos2, vec2};
 use frx_core::{
+    annotations::Annotation,
     config::spectral as dsp,
     spectrogram::{Settings, Spectrogram},
 };
@@ -153,6 +154,7 @@ impl View {
         duration: f64,
         height: f32,
         channel: usize,
+        annotations: &[Annotation],
     ) -> egui::Response {
         ui.horizontal(|ui| {
             ui.label(
@@ -221,6 +223,7 @@ impl View {
                 theme::MUTED,
             );
         }
+        widgets::annotation_lines(&painter, rect, annotations, duration);
         widgets::playhead(&painter, rect, position, duration);
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
     }

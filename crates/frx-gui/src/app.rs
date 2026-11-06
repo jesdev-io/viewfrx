@@ -14,7 +14,7 @@ use crate::{
     model::{Browser, seek_at},
     services::{
         AnalysisEvent, AnalysisOptions, AnalysisService, AudioRequest, AudioService, AudioSnapshot,
-        LibraryService, ScanEvent,
+        FileEvent, FileService, LibraryService, ScanEvent,
     },
     theme,
 };
@@ -22,7 +22,12 @@ use eframe::egui;
 #[cfg(test)]
 use eframe::egui::{pos2, vec2};
 use frx_audio::Command;
-use frx_core::{decode::AudioInfo, levels::db_to_gain, waveform::Waveform};
+use frx_core::{
+    annotations::{self, Annotation},
+    decode::AudioInfo,
+    levels::db_to_gain,
+    waveform::Waveform,
+};
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver},
@@ -34,6 +39,11 @@ pub struct App {
     snapshot: AudioSnapshot,
     library: LibraryService,
     analysis: AnalysisService,
+    files: FileService,
+    file_id: u64,
+    annotations: Vec<Annotation>,
+    annotation_text: String,
+    highpass: bool,
     browser: Browser,
     scan_id: u64,
     analysis_id: u64,
@@ -91,6 +101,11 @@ impl App {
             audio,
             snapshot: AudioSnapshot::default(),
             analysis: AnalysisService::start(ctx.clone(), args.cache),
+            files: FileService::start(ctx.clone()),
+            file_id: 0,
+            annotations: Vec::new(),
+            annotation_text: String::new(),
+            highpass: false,
             library,
             browser: Browser::default(),
             scan_id,
@@ -266,6 +281,8 @@ impl App {
         self.browser.selected = Some(path);
         self.info = None;
         self.waveform = None;
+        self.annotations.clear();
+        self.annotation_text.clear();
         self.error = None;
         self.normalization_applied = None;
         self.pending_play = false;
@@ -324,7 +341,12 @@ impl App {
             };
             match event {
                 AnalysisEvent::Metadata(id, result) if id == self.analysis_id => match result {
-                    Ok(info) => self.info = Some(info),
+                    Ok(info) => {
+                        // Annotations live in the file's own metadata tags.
+                        self.annotations = annotations::from_tags(&info.tags);
+                        self.annotation_text = annotations::format_annotations(&self.annotations);
+                        self.info = Some(info);
+                    }
                     Err(error) => {
                         self.error = Some(error);
                         self.pending_play = false;
@@ -372,8 +394,41 @@ impl App {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
+        for _ in 0..r::ANALYSIS_QUEUE {
+            let Ok(FileEvent::AnnotationsWritten(id, result)) = self.files.rx.try_recv() else {
+                break;
+            };
+            if id != self.file_id {
+                continue;
+            }
+            match result {
+                Ok(list) => {
+                    self.annotations = list;
+                    self.annotation_text = annotations::format_annotations(&self.annotations);
+                }
+                Err(error) => self.error = Some(error),
+            }
+        }
         self.finish_pending_play();
         self.sync_normalization();
+    }
+    /// Merge annotations (from the text field or a right-click) into the
+    /// selected file's metadata on the file worker; idempotent.
+    fn add_annotations(&mut self, new: Vec<Annotation>) {
+        let Some(path) = self.browser.selected.clone() else {
+            return;
+        };
+        if new.is_empty() {
+            return;
+        }
+        self.file_id = self.files.write_annotations(path, new);
+    }
+    /// Bottom text field: "[dd:hh:mm:ss] note" entries become annotations.
+    fn submit_annotation_text(&mut self) {
+        match annotations::parse_text(&self.annotation_text) {
+            Ok(new) => self.add_annotations(new),
+            Err(error) => self.error = Some(format!("{error:#}")),
+        }
     }
     fn choose(&mut self, folder: bool, ctx: &egui::Context) {
         let (tx, rx) = mpsc::sync_channel(1);
@@ -470,6 +525,20 @@ impl App {
     fn handle_seek(&mut self, response: egui::Response) {
         if response.double_clicked() {
             self.seek(0.0);
+            return;
+        }
+        // Right-click at a time position creates a timestamp annotation there.
+        if response.secondary_clicked()
+            && let Some(pointer) = response.interact_pointer_pos()
+            && let Some(seconds) = seek_at(
+                (pointer.x - response.rect.left()) / response.rect.width(),
+                self.duration(),
+            )
+        {
+            self.add_annotations(vec![Annotation {
+                seconds,
+                text: String::new(),
+            }]);
             return;
         }
         if (response.clicked()

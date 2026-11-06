@@ -6,6 +6,7 @@ pub const RAISED: Color32 = Color32::from_rgb(34, 38, 49);
 pub const AMBER: Color32 = Color32::from_rgb(255, 179, 0);
 pub const MUTED: Color32 = Color32::from_rgb(184, 190, 200);
 pub const PURPLE: Color32 = Color32::from_rgb(161, 112, 217);
+pub const ANNOTATION: Color32 = Color32::from_rgb(64, 200, 200);
 pub const NORMALIZED_WAVE: Color32 = Color32::from_rgb(70, 78, 105);
 pub const METER_GREEN: Color32 = Color32::from_rgb(70, 185, 136);
 pub const ALERT: Color32 = Color32::from_rgb(255, 132, 113);

@@ -6,6 +6,7 @@ mod tests;
 use eframe::egui;
 use frx_audio::{Command, DeviceInfo, Engine, Status};
 use frx_core::{
+    annotations::{self, Annotation},
     catalog::{Catalog, discover_ordered},
     decode::{AudioInfo, inspect},
     waveform::{Waveform, WaveformCache},
@@ -448,6 +449,71 @@ impl AnalysisService {
     }
 }
 impl Drop for AnalysisService {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+    }
+}
+
+/// Small filesystem-op worker: metadata annotation writes never run in
+/// egui update(). Results carry a generation so stale writes cannot clobber
+/// a newer selection.
+pub enum FileEvent {
+    AnnotationsWritten(u64, Result<Vec<Annotation>, String>),
+}
+struct FileJob {
+    id: u64,
+    path: PathBuf,
+    new: Vec<Annotation>,
+}
+pub struct FileService {
+    job: Arc<Mutex<Option<FileJob>>>,
+    generation: Arc<AtomicU64>,
+    shutdown: Arc<AtomicBool>,
+    pub rx: Receiver<FileEvent>,
+}
+impl FileService {
+    pub fn start(ctx: egui::Context) -> Self {
+        let job = Arc::new(Mutex::new(None::<FileJob>));
+        let jobs = job.clone();
+        let generation = Arc::new(AtomicU64::new(0));
+        let version = generation.clone();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let stop = shutdown.clone();
+        let (tx, rx) = mpsc::sync_channel(ANALYSIS_QUEUE);
+        thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                let next = jobs.lock().unwrap().take();
+                let Some(job) = next else {
+                    thread::sleep(Duration::from_millis(POLL_MS));
+                    continue;
+                };
+                let cancelled = || {
+                    stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != job.id
+                };
+                let result = annotations::annotate(&job.path, &job.new)
+                    .map_err(|e| format!("{e:#}"));
+                deliver(
+                    &tx,
+                    FileEvent::AnnotationsWritten(job.id, result),
+                    cancelled,
+                    &ctx,
+                );
+            }
+        });
+        Self {
+            job,
+            generation,
+            shutdown,
+            rx,
+        }
+    }
+    pub fn write_annotations(&self, path: PathBuf, new: Vec<Annotation>) -> u64 {
+        let id = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        *self.job.lock().unwrap() = Some(FileJob { id, path, new });
+        id
+    }
+}
+impl Drop for FileService {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
     }

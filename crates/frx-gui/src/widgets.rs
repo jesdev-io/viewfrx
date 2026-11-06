@@ -5,7 +5,7 @@ use crate::{
 };
 use eframe::egui::{self, Response, Sense, Stroke, pos2, vec2};
 use frx_audio::Status;
-use frx_core::waveform::Waveform;
+use frx_core::{annotations::Annotation, waveform::Waveform};
 use std::ops::RangeInclusive;
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -173,7 +173,27 @@ pub fn waveform_view(
     duration: f64,
     height: f32,
 ) -> Response {
-    waveform_channel_view(ui, waveform, position, duration, height, None)
+    waveform_channel_view(ui, waveform, position, duration, height, None, &[])
+}
+
+/// Vertical lines for timestamp annotations stored in the file's metadata.
+pub fn annotation_lines(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    annotations: &[Annotation],
+    duration: f64,
+) {
+    if duration <= 0.0 {
+        return;
+    }
+    for annotation in annotations {
+        let x = rect.left()
+            + (annotation.seconds / duration).clamp(0.0, 1.0) as f32 * rect.width();
+        painter.line_segment(
+            [pos2(x, rect.top()), pos2(x, rect.bottom())],
+            Stroke::new(l::THIN_STROKE, theme::ANNOTATION),
+        );
+    }
 }
 
 pub fn waveform_channel_view(
@@ -183,6 +203,7 @@ pub fn waveform_channel_view(
     duration: f64,
     height: f32,
     channel: Option<usize>,
+    annotations: &[Annotation],
 ) -> Response {
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
@@ -239,6 +260,7 @@ pub fn waveform_channel_view(
             theme::MUTED,
         );
     }
+    annotation_lines(&painter, rect, annotations, duration);
     playhead(&painter, rect, position, duration);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
