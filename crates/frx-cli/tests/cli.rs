@@ -85,11 +85,63 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
     ));
     assert_eq!(benchmark["frames"], 4000);
     assert_eq!(benchmark["sum_squares"], 500.0);
+    // The fixture is pure DC (L=+0.25, R=-0.25): it is listed as a file
+    // parameter in dBFS and excluded from normalization, which therefore
+    // leaves the (now silent) signal at unity gain.
+    let levels = success(run(dir.path(), &["levels", "with spaces.WAV"]));
+    let lv = &levels["levels"];
+    assert_eq!(lv["dc_offset"], serde_json::json!([0.25, -0.25]));
+    for db in lv["dc_offset_dbfs"].as_array().unwrap() {
+        assert!((db.as_f64().unwrap() + 12.0412).abs() < 0.01, "{db}");
+    }
+    assert_eq!(lv["sample_peak"], 0.25);
+    assert_eq!(lv["dc_removed_peak"], 0.0);
     let norm = success(run(dir.path(), &["normalization", "with spaces.WAV"]));
+    assert_eq!(norm["source_peak"], 0.0);
+    assert_eq!(norm["gain"], 1.0);
+    assert_eq!(norm["target_dbfs"], -1.0);
+    // Channel views: grouped stereo overviews plus single-channel selection.
+    let stereo = success(run(
+        dir.path(),
+        &["waveform", "with spaces.WAV", "--stereo", "--bins", "8"],
+    ));
+    let channels = stereo["channels"].as_array().unwrap();
+    assert_eq!(channels.len(), 2);
+    assert_eq!(channels[0]["channel"], 0);
+    assert_eq!(channels[0]["peaks"][0]["min"], 0.25);
+    assert_eq!(channels[1]["peaks"][0]["max"], -0.25);
+    let left = success(run(
+        dir.path(),
+        &["waveform", "with spaces.WAV", "--channel", "1", "--bins", "8"],
+    ));
+    assert_eq!(left["waveform"]["channel"], 1);
+    assert!(!run(dir.path(), &["waveform", "with spaces.WAV", "--channel", "2"]).status.success());
+    assert!(!run(dir.path(), &["waveform", "with spaces.WAV", "--stereo", "--channel", "0"]).status.success());
+    // A real AC signal still normalizes to -1 dBFS after DC removal.
+    let mut w = hound::WavWriter::create(
+        dir.path().join("tone.WAV"),
+        hound::WavSpec {
+            channels: 2,
+            sample_rate: 8000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .unwrap();
+    for i in 0..8000 {
+        let v = if i % 2 == 0 { 8192i16 } else { -8192 };
+        w.write_sample(v).unwrap();
+        w.write_sample(-v).unwrap();
+    }
+    w.finalize().unwrap();
+    let norm = success(run(dir.path(), &["normalization", "tone.WAV"]));
     assert_eq!(norm["source_peak"], 0.25);
     assert_eq!(norm["target_dbfs"], -1.0);
     let actual = 20.0 * (norm["gain"].as_f64().unwrap() * 0.25).log10();
     assert!((actual + 1.0).abs() < 1e-5);
+    let levels = success(run(dir.path(), &["levels", "tone.WAV"]));
+    assert_eq!(levels["levels"]["dc_offset"], serde_json::json!([0.0, 0.0]));
+    assert_eq!(levels["levels"]["dc_offset_dbfs"][0], serde_json::Value::Null);
 }
 
 #[cfg(feature = "spectrogram")]

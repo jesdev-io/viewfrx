@@ -1,4 +1,9 @@
-use crate::{catalog::atomic_json, config::*, decode::AudioReader, levels::Normalization};
+use crate::{
+    catalog::atomic_json,
+    config::*,
+    decode::AudioReader,
+    levels::{Normalization, amplitude_dbfs},
+};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -25,13 +30,102 @@ pub struct Waveform {
 }
 
 impl Waveform {
+    pub fn channels(&self) -> usize {
+        self.channel_peaks.len()
+    }
     pub fn sample_peak(&self) -> f32 {
         self.peaks.iter().fold(0.0f32, |peak, bin| {
             peak.max(bin.min.abs()).max(bin.max.abs())
         })
     }
+    /// Per-channel DC offset in dBFS; zero DC is None (JSON null), not -inf.
+    pub fn dc_offset_dbfs(&self) -> Vec<Option<f32>> {
+        self.dc_offset
+            .iter()
+            .map(|&dc| amplitude_dbfs(dc.abs()))
+            .collect()
+    }
+    /// Sample peak of the DC-removed signal. DC offset must not steer gain
+    /// scaling, so normalization and playback both use this peak.
+    pub fn dc_removed_sample_peak(&self) -> f32 {
+        self.channel_peaks
+            .iter()
+            .zip(&self.dc_offset)
+            .map(|(bins, &dc)| {
+                bins.iter().fold(0.0f32, |peak, bin| {
+                    peak.max((bin.min - dc).abs()).max((bin.max - dc).abs())
+                })
+            })
+            .fold(0.0f32, f32::max)
+    }
     pub fn normalization(&self) -> Result<Normalization> {
-        Normalization::from_peak(self.sample_peak())
+        Normalization::from_peak(self.dc_removed_sample_peak())
+    }
+    /// Peaks of one zero-based source channel, for L/R/Both views.
+    pub fn channel(&self, index: usize) -> Option<&[Peak]> {
+        self.channel_peaks.get(index).map(Vec::as_slice)
+    }
+}
+
+/// File-level signal parameters: DC offset (linear and dBFS) plus peak and the
+/// DC-removed normalization actually applied during playback.
+#[derive(Debug, Serialize)]
+pub struct Levels {
+    pub sample_rate: u32,
+    pub frames: u64,
+    pub channels: usize,
+    pub dc_offset: Vec<f32>,
+    pub dc_offset_dbfs: Vec<Option<f32>>,
+    pub sample_peak: f32,
+    pub sample_peak_dbfs: Option<f32>,
+    pub dc_removed_peak: f32,
+    pub dc_removed_peak_dbfs: Option<f32>,
+    pub normalization: Normalization,
+}
+
+impl Waveform {
+    pub fn levels(&self) -> Result<Levels> {
+        let dc_removed = self.dc_removed_sample_peak();
+        Ok(Levels {
+            sample_rate: self.sample_rate,
+            frames: self.frames,
+            channels: self.channels(),
+            dc_offset: self.dc_offset.clone(),
+            dc_offset_dbfs: self.dc_offset_dbfs(),
+            sample_peak: self.sample_peak(),
+            sample_peak_dbfs: amplitude_dbfs(self.sample_peak()),
+            dc_removed_peak: dc_removed,
+            dc_removed_peak_dbfs: amplitude_dbfs(dc_removed),
+            normalization: self.normalization()?,
+        })
+    }
+}
+
+/// One channel's overview for `waveform --channel`/`--stereo` views.
+#[derive(Debug, Serialize)]
+pub struct ChannelWaveform {
+    pub sample_rate: u32,
+    pub frames: u64,
+    pub frames_per_bin: u64,
+    pub channel: usize,
+    pub peaks: Vec<Peak>,
+    pub dc_offset: f32,
+    pub dc_offset_dbfs: Option<f32>,
+}
+
+impl Waveform {
+    pub fn channel_waveform(&self, index: usize) -> Option<ChannelWaveform> {
+        let peaks = self.channel(index)?;
+        let dc = *self.dc_offset.get(index)?;
+        Some(ChannelWaveform {
+            sample_rate: self.sample_rate,
+            frames: self.frames,
+            frames_per_bin: self.frames_per_bin,
+            channel: index,
+            peaks: peaks.to_vec(),
+            dc_offset: dc,
+            dc_offset_dbfs: amplitude_dbfs(dc.abs()),
+        })
     }
 }
 
@@ -307,6 +401,69 @@ mod tests {
         cache.get(&path, 8)?;
         assert_eq!(fs::read(&unrelated)?, b"user-owned data");
         assert_eq!(fs::read_dir(cache.directory)?.count(), 1);
+        Ok(())
+    }
+    #[test]
+    fn dc_offset_is_reported_in_dbfs_and_excluded_from_normalization() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("dc.wav");
+        // Channel 0: constant +0.25 (pure DC). Channel 1: +0.25 DC plus a
+        // +/-0.25 square wave, so its DC-removed peak stays 0.25.
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 8000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec)?;
+        for i in 0..8000 {
+            writer.write_sample(8192i16)?;
+            writer.write_sample(if i % 2 == 0 { 16384i16 } else { 0 })?;
+        }
+        writer.finalize()?;
+        let wave = analyze(&path, 8)?;
+        assert_eq!(wave.channels(), 2);
+        assert_eq!(wave.dc_offset, vec![0.25, 0.25]);
+        let dc_db = wave.dc_offset_dbfs();
+        assert!((dc_db[0].unwrap() + 12.0412).abs() < 0.01, "{:?}", dc_db);
+        assert_eq!(wave.sample_peak(), 0.5);
+        assert_eq!(wave.dc_removed_sample_peak(), 0.25);
+        let levels = wave.levels()?;
+        assert!((levels.dc_removed_peak_dbfs.unwrap() + 12.0412).abs() < 0.01);
+        assert!((levels.sample_peak_dbfs.unwrap() + 6.0206).abs() < 0.01);
+        // Normalization targets the DC-removed peak, not the raw one.
+        let n = wave.normalization()?;
+        assert_eq!(n.source_peak, 0.25);
+        assert!((amplitude_dbfs(n.gain * 0.25).unwrap() + 1.0).abs() < 1e-5);
+        // Pure-DC channel removal yields silence: gain stays unity there.
+        let pure = {
+            let p = dir.path().join("pure.wav");
+            let mut w = hound::WavWriter::create(
+                &p,
+                hound::WavSpec {
+                    channels: 1,
+                    sample_rate: 8000,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )?;
+            for _ in 0..800 {
+                w.write_sample(8192i16)?;
+            }
+            w.finalize()?;
+            analyze(&p, 8)?
+        };
+        assert_eq!(pure.dc_offset, vec![0.25]);
+        assert_eq!(pure.dc_removed_sample_peak(), 0.0);
+        assert_eq!(pure.normalization()?.gain, 1.0);
+        assert!((pure.dc_offset_dbfs()[0].unwrap() + 12.0412).abs() < 0.01);
+        // Channel views expose per-channel peaks and DC.
+        let ch1 = wave.channel_waveform(1).unwrap();
+        assert_eq!(ch1.channel, 1);
+        assert_eq!(ch1.peaks.len(), wave.peaks.len());
+        assert_eq!(ch1.dc_offset, 0.25);
+        assert!(wave.channel_waveform(2).is_none());
+        assert!(wave.channel(5).is_none());
         Ok(())
     }
     #[test]

@@ -56,9 +56,23 @@ enum Action {
         bins: usize,
         #[arg(long, default_value = WAVEFORM_CACHE)]
         cache: PathBuf,
+        /// Select a source channel (0 = Left, 1 = Right).
+        #[arg(long, conflicts_with = "stereo")]
+        channel: Option<usize>,
+        /// Return separate Left and Right overviews (stereo sources only).
+        #[arg(long)]
+        stereo: bool,
     },
     /// Calculate linked-channel peak normalization to -1 dBFS without changing audio.
+    /// The gain targets the DC-removed sample peak; DC offset is not removed from the file.
     Normalization {
+        path: PathBuf,
+        #[arg(long, default_value = WAVEFORM_CACHE)]
+        cache: PathBuf,
+    },
+    /// File signal parameters: DC offset in linear and dBFS, peaks, and the
+    /// DC-removed normalization actually used for playback.
+    Levels {
         path: PathBuf,
         #[arg(long, default_value = WAVEFORM_CACHE)]
         cache: PathBuf,
@@ -176,8 +190,31 @@ fn run() -> Result<()> {
             }
         }
         Action::Inspect { path } => emit(&inspect(&path)?)?,
-        Action::Waveform { path, bins, cache } => {
-            emit(&WaveformCache::new(cache_path(cache)).get(&path, bins)?)?
+        Action::Waveform {
+            path,
+            bins,
+            cache,
+            channel,
+            stereo,
+        } => {
+            let cached = WaveformCache::new(cache_path(cache)).get(&path, bins)?;
+            let waveform = &cached.waveform;
+            if stereo {
+                if waveform.channels() != 2 {
+                    bail!("--stereo requires a stereo recording");
+                }
+                let channels = (0..2)
+                    .map(|ch| waveform.channel_waveform(ch).context("missing channel"))
+                    .collect::<Result<Vec<_>>>()?;
+                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "channels": channels}))?;
+            } else if let Some(ch) = channel {
+                let view = waveform
+                    .channel_waveform(ch)
+                    .with_context(|| format!("source channel {ch} does not exist"))?;
+                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "waveform": view}))?;
+            } else {
+                emit(&cached)?;
+            }
         }
         Action::Normalization { path, cache } => emit(
             &WaveformCache::new(cache_path(cache))
@@ -185,6 +222,13 @@ fn run() -> Result<()> {
                 .waveform
                 .normalization()?,
         )?,
+        Action::Levels { path, cache } => {
+            let cached = WaveformCache::new(cache_path(cache)).get(&path, DEFAULT_WAVEFORM_BINS)?;
+            emit(&serde_json::json!({
+                "cache_hit": cached.cache_hit,
+                "levels": cached.waveform.levels()?,
+            }))?;
+        }
         #[cfg(feature = "spectrogram")]
         Action::Spectrogram {
             path,

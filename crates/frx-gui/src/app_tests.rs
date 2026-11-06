@@ -64,6 +64,11 @@ fn normalized_start_uses_the_same_peak_as_the_ghost_waveform() {
             min: -0.25,
             max: 0.1,
         }],
+        channel_peaks: vec![vec![frx_core::waveform::Peak {
+            min: -0.25,
+            max: 0.1,
+        }]],
+        dc_offset: vec![0.0],
         ..Default::default()
     });
     let preview = app.waveform.as_ref().unwrap().normalization().unwrap();
@@ -89,6 +94,11 @@ fn peak_fixture() -> Waveform {
             min: -0.25,
             max: 0.1,
         }],
+        channel_peaks: vec![vec![frx_core::waveform::Peak {
+            min: -0.25,
+            max: 0.1,
+        }]],
+        dc_offset: vec![0.0],
         ..Default::default()
     }
 }
@@ -194,6 +204,11 @@ fn empty_and_populated_views_render_without_an_audio_device() {
                     };
                     2
                 ],
+                channel_peaks: vec![
+                    vec![frx_core::waveform::Peak { min: -0.5, max: 0.5 }; 2],
+                    vec![frx_core::waveform::Peak { min: -0.5, max: 0.5 }; 2],
+                ],
+                dc_offset: vec![0.0, 0.0],
                 ..Default::default()
             });
         }
