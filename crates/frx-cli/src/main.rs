@@ -25,7 +25,7 @@ use std::{
     about = "CLI-first audio browser. Structured JSON output; audio stays local."
 )]
 struct Args {
-    #[arg(long, global = true, default_value = ".frxview/library.json")]
+    #[arg(long, global = true, hide = true, default_value = ".")]
     library: PathBuf,
     #[command(subcommand)]
     command: Action,
@@ -33,7 +33,7 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Action {
-    /// Register audio files/folders in place; does not copy or decode them.
+    /// Validate session roots and emit them; does not persist a catalog.
     Import {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
@@ -127,11 +127,18 @@ fn main() {
 
 fn run() -> Result<()> {
     let args = Args::parse();
+    let temporary_cache = tempfile::tempdir()?;
+    let cache_path = |path: PathBuf| {
+        if path == PathBuf::from(WAVEFORM_CACHE) {
+            temporary_cache.path().to_path_buf()
+        } else {
+            path
+        }
+    };
     match args.command {
         Action::Import { paths } => {
-            let mut catalog = Catalog::load(&args.library)?;
+            let mut catalog = Catalog::default();
             catalog.import(&paths)?;
-            catalog.save(&args.library)?;
             emit(&catalog)?;
         }
         Action::List {
@@ -142,7 +149,7 @@ fn run() -> Result<()> {
             let roots = if let Some(path) = path {
                 vec![path]
             } else {
-                Catalog::load(&args.library)?.roots
+                vec![std::env::current_dir()?]
             };
             let mut errors = 0;
             for root in roots {
@@ -164,10 +171,10 @@ fn run() -> Result<()> {
         }
         Action::Inspect { path } => emit(&inspect(&path)?)?,
         Action::Waveform { path, bins, cache } => {
-            emit(&WaveformCache::new(cache).get(&path, bins)?)?
+            emit(&WaveformCache::new(cache_path(cache)).get(&path, bins)?)?
         }
         Action::Normalization { path, cache } => emit(
-            &WaveformCache::new(cache)
+            &WaveformCache::new(cache_path(cache))
                 .get(&path, DEFAULT_WAVEFORM_BINS)?
                 .waveform
                 .normalization()?,
@@ -179,7 +186,11 @@ fn run() -> Result<()> {
             cache,
         } => {
             use frx_core::spectrogram::{Settings, SpectrogramCache};
-            emit(&SpectrogramCache::new(cache).get(&path, Settings { fft_size }, || false)?)?;
+            emit(&SpectrogramCache::new(cache_path(cache)).get(
+                &path,
+                Settings { fft_size },
+                || false,
+            )?)?;
         }
         Action::Devices => emit(&frx_audio::devices()?)?,
         Action::Play {
@@ -198,7 +209,7 @@ fn run() -> Result<()> {
             let gain = gain_db.map_or(gain, db_to_gain);
             frx_audio::render::validate_gain(gain)?;
             let command = if normalize {
-                let peak = WaveformCache::new(cache)
+                let peak = WaveformCache::new(cache_path(cache))
                     .get(&path, DEFAULT_WAVEFORM_BINS)?
                     .waveform
                     .sample_peak();

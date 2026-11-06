@@ -33,7 +33,7 @@ cargo build --release --workspace --features spectrogram --locked
 - **Keys:** Space play/pause; Up/Down browse visible results; Left/Right seek five seconds; Esc stop. Shortcuts do not intercept text entry.
 - **JESDEV theme:** dark compact panels, amber waveform/actions, purple playhead, bundled logo with provenance.
 
-The GUI shares the CLI's catalog/cache paths (`--library` and `--cache` override them). It deduplicates overlapping roots and caps displayed candidates at 100,000, with an explicit warning. Device switches stop playback. Output failure does not prevent browsing or analysis. `--muted` starts at gain zero.
+Sessions are stateless: opening files/folders replaces the current roots, Refresh rescans them, and nothing is restored on restart. Analysis caches are temporary by default. `--cache DIR` explicitly retains analysis artifacts for diagnostics; deprecated `--library` is ignored. Overlapping roots are deduplicated and displayed candidates are capped at 100,000, with an explicit warning. Device switches stop playback. Output failure does not prevent browsing or analysis. `--muted` starts at gain zero.
 
 On Linux the GUI uses egui/eframe with OpenGL and X11/Wayland runtime libraries; file dialogs use the desktop portal (`xdg-desktop-portal` plus a desktop-specific backend). It compiled here without additional GUI development headers. Drag-and-drop and startup paths remain alternatives if a desktop portal is unavailable. Windows/macOS native builds and dialogs remain unverified.
 
@@ -44,7 +44,7 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 ## Quick start
 
 ```sh
-# Import stores canonical source paths, NOT copies of the recordings.
+# Import validates and prints canonical roots; it does not persist a library.
 ./target/release/frxview import /path/to/recordings
 ./target/release/frxview list --recursive
 
@@ -62,11 +62,11 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 
 - Results are JSON; `list` emits one JSON object per file. Application errors go to stderr with a nonzero exit code; Clap usage errors use its standard text output.
 - Listing filters by extension; `inspect` and `play` validate the codec/container. Nested directories require `--recursive`; `--sort` enables alphabetical order within each directory. Directory symlinks are not followed. Overlapping imported roots can yield duplicate listing entries.
-- Catalog defaults to `.frxview/library.json` in the working directory; override with global `--library PATH`. Import is atomic, but catalog writes assume one writer at a time.
-- Waveforms default to `.frxview/waveforms`; override with `waveform --cache DIR`. `--bins` accepts powers of two from 2 to 65536. The cache budget is 64 MiB and eviction only touches frxview-owned entries.
+- `list` without a path browses the working directory, never a saved library. `import` only validates/emits roots; it does not retain them.
+- Waveforms use an automatically removed temporary cache; explicitly retain artifacts with `waveform --cache DIR`. `--bins` accepts powers of two from 2 to 65536. The cache budget is 64 MiB and eviction only touches frxview-owned entries.
 - Manual gain accepts linear `--gain` (0–4, 1 is unity) or `--gain-db`. Output is clamped to [-1, 1] and clipped samples are counted.
 - `--normalize` applies linked-channel sample-peak gain to reach −1 dBFS **before manual gain**. It preserves stereo balance and leaves silence unchanged. This is not loudness/true-peak normalization or DC-offset removal. The CLI computes or loads peak analysis before starting; the GUI waits without blocking its event loop and never starts normalized playback at an unanalysed gain.
-- `spectrogram` requires its Cargo feature. The CLI returns the same calibrated, bounded STFT overview used by the GUI; its separate 64 MiB cache defaults to `.frxview/waveforms/spectrograms`.
+- `spectrogram` requires its Cargo feature. The CLI returns the same calibrated, bounded STFT overview used by the GUI; its separate 64 MiB cache is temporary unless `--cache DIR` is supplied.
 - Rate is 0.25–4 and **changes pitch**. Linear interpolation is a preview implementation, not antialiased resampling or pitch-preserving time stretching.
 - Use `--device INDEX` on `play` or `session` to choose an output. Indices come from `devices` and may change when hardware changes. The device's default sample rate/channel count is used; a small supported output buffer is requested.
 

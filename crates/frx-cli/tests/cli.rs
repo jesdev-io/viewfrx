@@ -63,7 +63,8 @@ fn import_list_inspect_waveform_and_benchmark_without_audio_device() {
         &["waveform", "with spaces.WAV", "--bins", "8"],
     ));
     assert_eq!(first["cache_hit"], false);
-    assert_eq!(second["cache_hit"], true);
+    assert_eq!(second["cache_hit"], false);
+    assert!(!dir.path().join(".frxview").exists());
     assert_eq!(first["waveform"], second["waveform"]);
     let benchmark = success(run(
         dir.path(),
@@ -99,7 +100,8 @@ fn spectrogram_cli_is_calibrated_cached_and_validates_fft_size() {
         &["spectrogram", "with spaces.WAV", "--fft-size", "512"],
     ));
     assert_eq!(first["cache_hit"], false);
-    assert_eq!(second["cache_hit"], true);
+    assert_eq!(second["cache_hit"], false);
+    assert!(!dir.path().join(".frxview").exists());
     assert_eq!(first["spectrogram"], second["spectrogram"]);
     let spectrum = &first["spectrogram"];
     assert_eq!(spectrum["frames"], 8000);

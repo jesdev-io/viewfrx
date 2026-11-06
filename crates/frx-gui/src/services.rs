@@ -209,7 +209,7 @@ fn deliver<T>(
 }
 
 impl LibraryService {
-    pub fn start(ctx: egui::Context, catalog_path: PathBuf) -> Self {
+    pub fn start(ctx: egui::Context, _catalog_path: PathBuf) -> Self {
         let job = Arc::new(Mutex::new(None::<ScanJob>));
         let jobs = job.clone();
         let generation = Arc::new(AtomicU64::new(0));
@@ -218,6 +218,7 @@ impl LibraryService {
         let stop = shutdown.clone();
         let (tx, rx) = mpsc::sync_channel(SCAN_QUEUE);
         thread::spawn(move || {
+            let mut roots = Vec::new();
             while !stop.load(Ordering::Acquire) {
                 let next = jobs.lock().unwrap().take();
                 let Some(job) = next else {
@@ -230,11 +231,11 @@ impl LibraryService {
                 };
                 let mut batch = Vec::with_capacity(SCAN_BATCH);
                 let result = (|| -> anyhow::Result<()> {
-                    let mut catalog = Catalog::load(&catalog_path)?;
                     if !job.imports.is_empty() {
-                        catalog.import(&job.imports)?;
-                        catalog.save(&catalog_path)?;
+                        roots = job.imports.clone();
                     }
+                    let mut catalog = Catalog::default();
+                    catalog.import(&roots)?;
                     let mut seen = HashSet::new();
                     let mut failures = 0;
                     for root in &catalog.roots {
@@ -310,9 +311,11 @@ impl LibraryService {
     pub fn request(&self, imports: Vec<PathBuf>, recursive: bool) -> u64 {
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         let mut pending = self.job.lock().unwrap();
-        // Keep imports additive even when a rescan supersedes a queued scan.
+        // A folder replaces the session; refresh retains the current roots.
         let mut job = pending.take().unwrap_or_default();
-        job.imports.extend(imports);
+        if !imports.is_empty() {
+            job.imports = imports;
+        }
         job.recursive = recursive;
         job.generation = generation;
         *pending = Some(job);

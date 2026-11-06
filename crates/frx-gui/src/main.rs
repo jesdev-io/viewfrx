@@ -23,11 +23,13 @@ static SMOKE_FAILED: AtomicBool = AtomicBool::new(false);
     about = "JESDEV audio browser — native desktop frontend"
 )]
 pub struct Args {
-    /// Files/folders to register in the local catalog on startup.
+    /// Files/folders forming this session; nothing is restored from previous runs.
     paths: Vec<PathBuf>,
-    #[arg(long, default_value = ".frxview/library.json")]
+    /// Deprecated compatibility argument; catalogs are no longer read or written.
+    #[arg(long, hide = true, default_value = ".")]
     library: PathBuf,
-    #[arg(long, default_value = ".frxview/waveforms")]
+    /// Optional explicit analysis-artifact directory; otherwise temporary.
+    #[arg(long, default_value = ":temporary:")]
     cache: PathBuf,
     /// Start with gain zero, useful for safe automated visual checks.
     #[arg(long)]
@@ -41,7 +43,11 @@ pub struct Args {
 }
 
 fn main() -> eframe::Result {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    let temporary_cache = tempfile::tempdir().expect("create session cache");
+    if args.cache == PathBuf::from(":temporary:") {
+        args.cache = temporary_cache.path().to_path_buf();
+    }
     if args.smoke_seconds.is_some_and(|s| {
         !s.is_finite()
             || !(config::runtime::SMOKE_MIN_SECONDS..=config::runtime::SMOKE_MAX_SECONDS)

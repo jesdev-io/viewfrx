@@ -26,6 +26,25 @@ fn library_worker_streams_sorted_deduplicated_results() {
         }
     }
     assert_eq!(names, ["a.wav", "b.wav"]);
+    assert!(!dir.path().join("catalog.json").exists());
+    let replacement = dir.path().join("replacement");
+    std::fs::create_dir(&replacement).unwrap();
+    std::fs::write(replacement.join("c.wav"), b"").unwrap();
+    let id = library.request(vec![replacement], true);
+    let mut names = Vec::new();
+    loop {
+        match library.rx.recv_timeout(Duration::from_secs(3)).unwrap() {
+            ScanEvent::Batch(generation, entries) if generation == id => {
+                names.extend(entries.into_iter().map(|e| e.name))
+            }
+            ScanEvent::Done(generation, error) if generation == id => {
+                assert!(error.is_none());
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(names, ["c.wav"]);
 }
 
 #[test]
