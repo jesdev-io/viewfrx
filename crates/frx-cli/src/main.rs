@@ -621,6 +621,16 @@ fn session(engine: Engine) -> Result<()> {
                             .cloned()
                             .context("annotate needs a path")?,
                     )?;
+                    if value
+                        .get("clear")
+                        .and_then(|c| c.as_bool())
+                        .unwrap_or(false)
+                    {
+                        // Same as `annotate --clear`: remove all markers.
+                        annotations::write(&path, &[])?;
+                        emit(&json!({"ok":true, "path": path, "annotations": []}))?;
+                        return Ok(true);
+                    }
                     let new = if let Some(seconds) = value.get("seconds").and_then(|s| s.as_f64()) {
                         if !seconds.is_finite() || !(0.0..=MAX_SEEK_SECONDS).contains(&seconds) {
                             bail!("seconds must be finite and between 0 and {MAX_SEEK_SECONDS}");

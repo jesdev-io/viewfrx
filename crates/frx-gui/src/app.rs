@@ -858,6 +858,14 @@ impl App {
         }
     }
     fn keyboard(&mut self, ctx: &egui::Context) {
+        // Ctrl+S (save annotations) must work even while a text field has
+        // keyboard focus — right after creating a marker the annotation
+        // field is focused, and the save shortcut must not be swallowed.
+        let save =
+            ctx.input(|i| i.key_pressed(egui::Key::S) && (i.modifiers.command || i.modifiers.ctrl));
+        if save && self.annotations_dirty {
+            self.request_save_dialog(ctx);
+        }
         if ctx.wants_keyboard_input() {
             return;
         }
@@ -890,11 +898,6 @@ impl App {
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.stop();
-        }
-        let save =
-            ctx.input(|i| i.key_pressed(egui::Key::S) && (i.modifiers.command || i.modifiers.ctrl));
-        if save && self.annotations_dirty {
-            self.request_save_dialog(ctx);
         }
     }
     fn diagnostic(&mut self, ctx: &egui::Context) {

@@ -770,3 +770,106 @@ fn deleting_an_annotation_row_removes_its_marker() {
     app.sync_annotations_from_text();
     assert_eq!(app.annotations.len(), 1);
 }
+
+#[test]
+fn ctrl_s_saves_even_while_annotation_field_has_focus_and_reselect_shows_markers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.wav");
+    {
+        let mut w = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: 8000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for i in 0..8000 {
+            let v = if i % 2 == 0 { 4096i16 } else { -4096 };
+            w.write_sample(v).unwrap();
+            w.write_sample(-v).unwrap();
+        }
+        w.finalize().unwrap();
+    }
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    app.browser.selected = Some(path.clone());
+    app.info = Some(AudioInfo {
+        sample_rate: 8000,
+        channels: 2,
+        frames: Some(8000),
+        duration_seconds: Some(1.0),
+        bits_per_sample: Some(16),
+        tags: vec![],
+    });
+    // Floating edit, then focus the annotation field (as after a right-click).
+    app.annotation_text = "[00:00:00:50] saved note".into();
+    app.sync_annotations_from_text();
+    assert!(app.annotations_dirty);
+    let some_id = egui::Id::new("dummy");
+    let _ = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.memory_mut(|m| m.request_focus(some_id));
+        });
+    });
+    // Ctrl+S while a widget has keyboard focus must still open the save flow.
+    let mods = egui::Modifiers {
+        ctrl: true,
+        ..Default::default()
+    };
+    let input = egui::RawInput {
+        modifiers: mods,
+        events: vec![egui::Event::Key {
+            key: egui::Key::S,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: mods,
+        }],
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| app.keyboard(ctx));
+    assert!(
+        app.save_picker.is_some(),
+        "Ctrl+S must trigger save even with a focused text field"
+    );
+    // Complete the save in place (what the dialog's overwrite confirm does).
+    app.save_picker = None;
+    app.save_annotations_to(path.clone());
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        app.poll(&ctx);
+        if !app.annotations_dirty {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(!app.annotations_dirty);
+    assert_eq!(
+        frx_core::annotations::read(&path).unwrap(),
+        vec![Annotation {
+            seconds: 0.5,
+            text: "saved note".into()
+        }]
+    );
+    // Come back to the file: the saved marker is rendered from disk.
+    app.select_now(path.clone(), false);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        app.poll(&ctx);
+        if app.info.is_some() && !app.annotations.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        app.annotations,
+        vec![Annotation {
+            seconds: 0.5,
+            text: "saved note".into()
+        }],
+        "re-selecting the file must show the saved annotations"
+    );
+}
