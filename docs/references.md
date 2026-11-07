@@ -38,4 +38,4 @@ Source: `../jesdev/jesdev-io-website/docs/assets/stylesheets/jesdev.css` and `mk
 | Purple | `#a170d9` |
 | Burgundy | `#980825` |
 
-Selected site logo: `docs/assets/images/cropped-jesdev-logo-complex.webp`; additional vector wordmark: `docs/assets/images/jesdev_logo_text.drawio-1.svg`. Dark compact panels, strong headings, amber interaction accents; code font stack uses SourceCode and system monospace fallbacks. Do not port the website's large spacing, shadows or hero typography into a dense audio browser. The raster logo is bundled unchanged in `crates/viewfrx-gui/assets/jesdev.webp` with provenance in that directory's README. Redistribution rights still need confirmation before publication.
+JESDEV website colors and compact dark visual language remain theme references; the project-specific logo is supplied as editable Draw.io SVGs in `assets/`. The in-app logo is rasterized from `viewfrx_logo.drawio_15pt.svg`, while the gradient icon is rasterized from `viewfrx_logo.drawio_15pt_icon.svg`.

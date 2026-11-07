@@ -126,7 +126,7 @@ impl App {
                     }
                     // Branding in the right upper corner.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.image((self.logo.id(), vec2(l::HEADER_LOGO, l::HEADER_LOGO)));
+                        ui.image((self.logo.id(), self.logo_size(l::HEADER_LOGO)));
                         ui.label(RichText::new("viewfrx").size(l::BRAND_FONT).strong());
                     });
                 });
@@ -464,9 +464,9 @@ impl App {
                 let Some(path) = self.browser.selected.clone() else {
                     ui.vertical_centered(|ui| {
                         ui.add_space(ui.available_height() * l::EMPTY_TOP_FRACTION);
-                        ui.image((self.logo.id(), vec2(l::EMPTY_LOGO, l::EMPTY_LOGO)));
+                        ui.image((self.logo.id(), self.logo_size(l::EMPTY_LOGO)));
                         ui.add_space(l::SPACE_SECTION);
-                        ui.heading("Hear and see your sound.");
+                        ui.heading("A lightning fast audio file browser");
                         ui.label(
                             RichText::new("Import audio. Browse. Listen. See.").color(theme::MUTED),
                         );

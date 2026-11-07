@@ -102,6 +102,7 @@ pub struct App {
     device: Option<usize>,
     picker: Option<Receiver<Vec<PathBuf>>>,
     logo: egui::TextureHandle,
+    logo_aspect: f32,
     seek_sent: Instant,
     #[cfg(feature = "spectrogram")]
     spectral: crate::spectral::View,
@@ -128,8 +129,9 @@ impl App {
             cfg!(feature = "spectrogram")
         );
         let image = theme::logo();
+        let logo_aspect = image.width() as f32 / image.height() as f32;
         let logo = ctx.load_texture(
-            "jesdev",
+            "viewfrx-brand",
             egui::ColorImage::from_rgba_unmultiplied(
                 [image.width() as usize, image.height() as usize],
                 image.as_raw(),
@@ -195,6 +197,7 @@ impl App {
             device: None,
             picker: None,
             logo,
+            logo_aspect,
             seek_sent: Instant::now(),
             #[cfg(feature = "spectrogram")]
             spectral: {
@@ -212,6 +215,10 @@ impl App {
             capture_done: None,
         }
     }
+    fn logo_size(&self, height: f32) -> egui::Vec2 {
+        vec2(height * self.logo_aspect, height)
+    }
+
     fn analysis_options(&self) -> AnalysisOptions {
         AnalysisOptions {
             #[cfg(feature = "spectrogram")]

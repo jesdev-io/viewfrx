@@ -43,7 +43,13 @@ pub fn apply(ctx: &egui::Context) {
 }
 
 pub fn logo() -> image::RgbaImage {
-    image::load_from_memory(include_bytes!("../assets/jesdev.webp"))
-        .expect("bundled JESDEV logo")
+    image::load_from_memory(include_bytes!("../assets/viewfrx-logo.png"))
+        .expect("bundled viewfrx logo")
+        .into_rgba8()
+}
+
+pub fn icon() -> image::RgbaImage {
+    image::load_from_memory(include_bytes!("../assets/viewfrx-icon.png"))
+        .expect("bundled viewfrx icon")
         .into_rgba8()
 }
