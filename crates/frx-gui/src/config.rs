@@ -28,6 +28,10 @@ pub mod controls {
     pub const DEBUG_CONSOLE_DEFAULT: bool = false;
     #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_DEFAULT: bool = true;
+    /// Spectrogram display starts off; enable via the settings toggle or
+    /// the --spectrogram startup flag.
+    #[cfg(feature = "spectrogram")]
+    pub const SPECTROGRAM_DEFAULT: bool = false;
     /// Candidate dB grid steps (ascending); the smallest one that still fits
     /// the current panel height is used, so the grid adapts to resizing.
     #[cfg(feature = "spectrogram")]

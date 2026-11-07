@@ -58,7 +58,7 @@ cargo build --release --workspace --features spectrogram --locked
 ./target/release/frxview-gui /path/to/recordings
 ```
 
-Feature builds enable the source spectrogram above the waveform by default. The checkbox disables it at runtime. FFT sizes are 512, 1024, 2048, 4096 or 8192; default 2048. Display floor defaults to −100 dBFS, with 0 dBFS at the top of the color scale. Double-click controls to restore defaults. Either plot supports seeking; double-click rewinds.
+Feature builds can show the source spectrogram; it starts off by default (settings toggle or `--spectrogram`). FFT sizes are 512, 1024, 2048, 4096 or 8192; default 2048. Display floor defaults to −100 dBFS, with 0 dBFS at the top of the color scale. Double-click controls to restore defaults. Either plot supports seeking; double-click rewinds.
 
 The shared core implements:
 

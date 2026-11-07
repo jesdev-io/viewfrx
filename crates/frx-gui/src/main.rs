@@ -39,6 +39,10 @@ pub struct Args {
     /// Pipe console log lines to the debug window (in-app console).
     #[arg(long)]
     debug_console: bool,
+    /// Start with the spectrogram view enabled (default: off).
+    #[cfg(feature = "spectrogram")]
+    #[arg(long)]
+    spectrogram: bool,
     /// Diagnostic: close after this many seconds (no automatic audible playback).
     #[arg(long)]
     smoke_seconds: Option<f64>,

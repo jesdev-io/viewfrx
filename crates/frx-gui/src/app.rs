@@ -186,7 +186,11 @@ impl App {
             logo,
             seek_sent: Instant::now(),
             #[cfg(feature = "spectrogram")]
-            spectral: Default::default(),
+            spectral: {
+                let mut v = crate::spectral::View::default();
+                v.enabled = v.enabled || args.spectrogram;
+                v
+            },
             started: Instant::now(),
             smoke_seconds: args.smoke_seconds,
             smoke_reported: false,
@@ -583,10 +587,21 @@ impl App {
         annotations::merge(&mut self.annotations, &new);
         if self.annotations != before {
             self.annotations_dirty = self.annotations != self.saved_annotations;
-            if sync_field {
-                // Right-click rewrites the field from the canonical marker list
-                // (redundant empty lines disappear); typing never rewrites it.
-                self.annotation_text = annotations::format_annotations(&self.annotations);
+            if sync_field && !new.is_empty() {
+                // Right-click rewrites the field from the canonical marker
+                // list (so deleted/redundant lines cannot resurrect), with
+                // the new marker's line moved to the END; the field is
+                // focused with cursor_at_end, i.e. right after that line,
+                // ready to type the note — even when the new marker sorts
+                // earlier in time. Typing never rewrites the field.
+                let new_line = annotations::format_timestamp(new[0].seconds);
+                let mut lines: Vec<String> = annotations::format_annotations(&self.annotations)
+                    .lines()
+                    .map(|l| l.to_string())
+                    .collect();
+                lines.retain(|l| l != &new_line);
+                lines.push(new_line);
+                self.annotation_text = lines.join("\n");
             }
             crate::logln!(
                 "annotation added (floating, {} unsaved change(s))",
@@ -600,8 +615,14 @@ impl App {
     /// field immediately becomes a floating annotation (idempotent). The
     /// field itself is never rewritten while typing.
     fn sync_annotations_from_text(&mut self) {
-        if let Ok(parsed) = annotations::parse_text(&self.annotation_text) {
-            self.add_annotations(parsed, false);
+        // While editing, the text field is the source of truth: deleting a
+        // row removes its marker (and its plot line); parsing is all-or-
+        // nothing so a half-typed marker never corrupts the list.
+        if let Ok(parsed) = annotations::parse_text(&self.annotation_text)
+            && parsed != self.annotations
+        {
+            self.annotations = parsed;
+            self.annotations_dirty = self.annotations != self.saved_annotations;
         }
     }
     /// Open the standard save dialog (file naming + native overwrite warning)

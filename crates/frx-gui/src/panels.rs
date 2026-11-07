@@ -903,11 +903,15 @@ impl App {
                 // and newlines render as real line breaks (no replacement glyph).
                 let rows = ((height - 2.0 * l::CARD_PADDING as f32 - 16.0) / 18.0)
                     .max(1.0) as usize;
+                let focus = self.focus_annotation_field;
                 let response = ui.add(
                     egui::TextEdit::multiline(&mut self.annotation_text)
                         .hint_text("[hh:mm:ss:cc] note per row — markers appear instantly, Ctrl+S saves")
                         .desired_width(f32::INFINITY)
-                        .desired_rows(rows),
+                        .desired_rows(rows)
+                        // After a right-click the cursor goes to the end, right
+                        // after the newly appended timestamp line.
+                        .cursor_at_end(focus),
                 );
                 // Automatic: every complete marker in the text becomes a
                 // floating annotation immediately (idempotent), without
@@ -915,7 +919,7 @@ impl App {
                 if response.changed() {
                     self.sync_annotations_from_text();
                 }
-                if self.focus_annotation_field {
+                if focus {
                     ui.memory_mut(|m| m.request_focus(response.id));
                     self.focus_annotation_field = false;
                 }

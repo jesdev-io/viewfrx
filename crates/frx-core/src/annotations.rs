@@ -841,6 +841,44 @@ mod tests {
     }
 
     #[test]
+    fn removing_all_annotations_leaves_the_audio_file_playable() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("a.wav");
+        wav_fixture(&path, 800)?;
+        let added = vec![Annotation {
+            seconds: 1.0,
+            text: "x".into(),
+        }];
+        assert_eq!(annotate(&path, &added)?, added);
+        assert_eq!(read(&path)?, added);
+        // Delete every annotation (empty write) — the file must stay playable.
+        write(&path, &[])?;
+        assert_eq!(read(&path)?, Vec::new());
+        let mut reader = AudioReader::open(&path)?;
+        assert_eq!(reader.info().frames, Some(800));
+        let mut frame = [0.0f32; 2];
+        let mut count = 0;
+        while reader.next_frame(&mut frame)? {
+            count += 1;
+        }
+        assert_eq!(count, 800);
+        // Same for MP3.
+        let mp3 = dir.path().join("t.mp3");
+        fs::write(&mp3, include_bytes!("../tests/fixtures/tone.mp3"))?;
+        annotate(&mp3, &added)?;
+        write(&mp3, &[])?;
+        assert_eq!(read(&mp3)?, Vec::new());
+        let mut reader = AudioReader::open(&mp3)?;
+        let mut frame = [0.0f32; 2];
+        let mut count = 0;
+        while reader.next_frame(&mut frame)? {
+            count += 1;
+        }
+        assert_eq!(count, 11025);
+        Ok(())
+    }
+
+    #[test]
     fn unsupported_formats_are_rejected_without_modification() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("a.flac");

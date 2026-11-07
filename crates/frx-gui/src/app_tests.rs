@@ -8,6 +8,8 @@ fn test_app(ctx: &egui::Context, directory: &std::path::Path) -> (App, Receiver<
         cache: directory.join("cache"),
         muted: true,
         debug_console: false,
+        #[cfg(feature = "spectrogram")]
+        spectrogram: false,
         smoke_seconds: None,
         screenshot: None,
     };
@@ -699,4 +701,50 @@ fn typing_annotation_text_never_accumulates_per_keystroke_markers() {
             text: "test".into()
         }]
     );
+}
+
+#[test]
+fn deleting_an_annotation_row_removes_its_marker() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    app.browser.selected = Some(dir.path().join("a.wav"));
+    app.info = Some(AudioInfo {
+        sample_rate: 8000,
+        channels: 2,
+        frames: Some(8000),
+        duration_seconds: Some(1.0),
+        bits_per_sample: Some(16),
+        tags: vec![],
+    });
+    app.annotations = vec![
+        Annotation {
+            seconds: 0.25,
+            text: "first".into(),
+        },
+        Annotation {
+            seconds: 0.75,
+            text: "second".into(),
+        },
+    ];
+    app.annotation_text = "[00:00:00:25] first\n[00:00:00:75] second".into();
+    // Delete the second row from the field -> its marker (and plot bar) is gone.
+    app.annotation_text = "[00:00:00:25] first".into();
+    app.sync_annotations_from_text();
+    assert_eq!(
+        app.annotations,
+        vec![Annotation {
+            seconds: 0.25,
+            text: "first".into()
+        }]
+    );
+    assert!(app.annotations_dirty);
+    // Deleting all rows clears the list (the file stays untouched until saved).
+    app.annotation_text = String::new();
+    app.sync_annotations_from_text();
+    // Empty text does not parse -> markers stay (half-typed input is safe)...
+    assert_eq!(app.annotations.len(), 1);
+    app.annotation_text = "[00:00:00:00]".into(); // parseable but empty-ish marker
+    app.sync_annotations_from_text();
+    assert_eq!(app.annotations.len(), 1);
 }

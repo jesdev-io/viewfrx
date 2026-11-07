@@ -42,7 +42,7 @@ Sessions are stateless: opening files/folders replaces the current roots, Refres
 
 On Linux the GUI uses egui/eframe with OpenGL and X11/Wayland runtime libraries; file dialogs use the desktop portal (`xdg-desktop-portal` plus a desktop-specific backend). It compiled here without additional GUI development headers. Drag-and-drop and startup paths remain alternatives if a desktop portal is unavailable. Windows/macOS native builds and dialogs remain unverified.
 
-The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. Feature builds show the spectrogram by default. See [GUI design, tests and limitations](docs/gui.md) and [level/normalization/spectral conventions](docs/analysis.md).
+The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. Feature builds can show the spectrogram (off by default; enable via the settings toggle or `--spectrogram`). See [GUI design, tests and limitations](docs/gui.md) and [level/normalization/spectral conventions](docs/analysis.md).
 
 ![Native spectrogram and normalized waveform preview](docs/assets/analysis.png)
 

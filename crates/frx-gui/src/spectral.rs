@@ -74,7 +74,7 @@ pub struct View {
 impl Default for View {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: c::SPECTROGRAM_DEFAULT,
             pending: false,
             fft_size: dsp::DEFAULT_FFT_SIZE,
             floor_db: c::SPECTRAL_FLOOR_DEFAULT,

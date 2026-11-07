@@ -69,6 +69,7 @@ def main():
         result = subprocess.run([
             str(args.binary.resolve()), str(sounds), "--muted", "--library", str(work / "library.json"),
             "--cache", str(work / "cache"), "--smoke-seconds", "3", "--screenshot", str(screenshot),
+            *(["--spectrogram"] if args.expect_spectrogram else []),
         ], cwd=ROOT, text=True, capture_output=True, timeout=25)
         if result.returncode:
             raise RuntimeError(f"GUI exit {result.returncode}: {result.stderr}")

@@ -145,6 +145,9 @@ enum Action {
         /// in place (the GUI save-dialog equivalent).
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Remove all annotations from the file's metadata.
+        #[arg(long)]
+        clear: bool,
     },
     /// List the timestamp annotations stored in a file's metadata.
     Annotations { path: PathBuf },
@@ -430,7 +433,25 @@ fn run() -> Result<()> {
             text,
             seconds,
             output,
+            clear,
         } => {
+            if clear {
+                let stored = match &output {
+                    Some(dst) => {
+                        let empty: Vec<Annotation> = Vec::new();
+                        annotations::save_as(&path, dst, &empty)?;
+                        empty
+                    }
+                    None => {
+                        annotations::write(&path, &[])?;
+                        Vec::new()
+                    }
+                };
+                emit(
+                    &json!({"path": path, "output": output, "annotations": annotations::to_json(&stored)}),
+                )?;
+                return Ok(());
+            }
             let new = if let Some(seconds) = seconds {
                 if !seconds.is_finite() || !(0.0..=MAX_SEEK_SECONDS).contains(&seconds) {
                     bail!("seconds must be finite and between 0 and {MAX_SEEK_SECONDS}");

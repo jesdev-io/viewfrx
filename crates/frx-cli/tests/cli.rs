@@ -543,3 +543,21 @@ fn spectrum_third_octave_is_log_frequency_aggregation() {
     assert!((hz - 1000.0).abs() < 60.0, "{hz}");
     assert!((db + 6.0206).abs() < 0.1, "{db}");
 }
+
+#[test]
+fn annotate_clear_removes_all_markers_and_file_stays_playable() {
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let file = "with spaces.WAV";
+    let first = success(run(dir.path(), &["annotate", file, "[00:00:05:00] a"]));
+    assert_eq!(first["annotations"].as_array().unwrap().len(), 1);
+    let cleared = success(run(dir.path(), &["annotate", file, "--clear"]));
+    assert_eq!(cleared["annotations"].as_array().unwrap().len(), 0);
+    let listed = success(run(dir.path(), &["annotations", file]));
+    assert_eq!(listed["annotations"].as_array().unwrap().len(), 0);
+    // Still a normal audio file.
+    let info = success(run(dir.path(), &["inspect", file]));
+    assert_eq!(info["frames"], 8000);
+    let wave = success(run(dir.path(), &["waveform", file, "--bins", "8"]));
+    assert_eq!(wave["waveform"]["frames"], 8000);
+}
