@@ -1066,7 +1066,7 @@ impl eframe::App for App {
                             .size(l::SMALL_FONT),
                     );
                     ui.add_space(l::SPACE_SMALL);
-                    ui.label("CLI-first audio browser · native desktop GUI");
+                    ui.label("A lightning fast audio file browser for field recordings and more");
                     ui.label(format!(
                         "spectrogram feature: {}",
                         if cfg!(feature = "spectrogram") {

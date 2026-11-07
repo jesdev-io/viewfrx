@@ -25,7 +25,7 @@ use viewfrx_core::{config::DEFAULT_WAVEFORM_BINS, levels::db_to_gain};
 #[command(
     name = "viewfrx",
     version,
-    about = "CLI-first audio browser. Structured JSON output; audio stays local."
+    about = "A lightning fast audio file browser for field recordings and more"
 )]
 struct Args {
     #[arg(long, global = true, hide = true, default_value = ".")]
