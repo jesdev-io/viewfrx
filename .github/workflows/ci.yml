@@ -41,11 +41,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: viewfrx-${{ matrix.os }}
-          path: |
-            target/release/viewfrx
-            target/release/viewfrx.exe
-            target/release/viewfrx-gui
-            target/release/viewfrx-gui.exe
+          path: target/release/viewfrx*
+          if-no-files-found: error
 
   release:
     name: Release (tag ${{ github.ref_name }})
