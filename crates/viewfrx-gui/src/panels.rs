@@ -84,6 +84,12 @@ impl App {
                                 ui.close();
                             }
                         });
+                        ui.menu_button("Help", |ui| {
+                            if ui.button("About viewfrx").clicked() {
+                                self.about_open = true;
+                                ui.close();
+                            }
+                        });
                         ui.menu_button("View", |ui| {
                             ui.selectable_value(
                                 &mut self.wave_channels,
@@ -122,11 +128,6 @@ impl App {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.image((self.logo.id(), vec2(l::HEADER_LOGO, l::HEADER_LOGO)));
                         ui.label(RichText::new("viewfrx").size(l::BRAND_FONT).strong());
-                        ui.label(
-                            RichText::new("/  JESDEV")
-                                .color(theme::AMBER)
-                                .size(l::BRAND_SUBFONT),
-                        );
                     });
                 });
             });

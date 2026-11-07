@@ -214,7 +214,8 @@ fn run() -> Result<()> {
     let args = Args::parse();
     VERBOSE.store(args.verbose, Ordering::Relaxed);
     vlog(format!(
-        "viewfrx invoked: {}",
+        "viewfrx v{} invoked: {}",
+        env!("CARGO_PKG_VERSION"),
         std::env::args().skip(1).collect::<Vec<_>>().join(" ")
     ));
     let temporary_cache = tempfile::tempdir()?;
@@ -570,7 +571,7 @@ fn run() -> Result<()> {
 }
 
 fn session(engine: Engine) -> Result<()> {
-    emit(&json!({"event":"ready","protocol":1}))?;
+    emit(&json!({"event":"ready","protocol":1,"version":env!("CARGO_PKG_VERSION")}))?;
     // Bound each request so accidental binary/huge input cannot exhaust memory.
     let mut input = io::stdin().lock();
     loop {

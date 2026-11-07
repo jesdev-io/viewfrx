@@ -18,9 +18,9 @@ use crate::{
     },
     theme,
 };
-use eframe::egui::{self, RichText};
 #[cfg(test)]
-use eframe::egui::{pos2, vec2};
+use eframe::egui::pos2;
+use eframe::egui::{self, RichText, vec2};
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver},
@@ -59,6 +59,8 @@ pub struct App {
     last_play_start: Option<f64>,
     /// Focus the annotation text field next frame (after a right-click).
     focus_annotation_field: bool,
+    /// About dialog open.
+    about_open: bool,
     /// Char position for the cursor: end of the newly created marker's row.
     annotation_cursor_char: Option<usize>,
     /// User-draggable plot heights (session-local, never persisted).
@@ -120,6 +122,11 @@ impl App {
     }
     fn with_audio(ctx: &egui::Context, args: Args, audio: AudioService) -> Self {
         theme::apply(ctx);
+        crate::logln!(
+            "viewfrx-gui v{} starting (spectrogram feature: {})",
+            env!("CARGO_PKG_VERSION"),
+            cfg!(feature = "spectrogram")
+        );
         let image = theme::logo();
         let logo = ctx.load_texture(
             "jesdev",
@@ -149,6 +156,7 @@ impl App {
             zoom: None,
             last_play_start: None,
             focus_annotation_field: false,
+            about_open: false,
             annotation_cursor_char: None,
             wave_height: 0.0,
             spec_height: 0.0,
@@ -1034,6 +1042,54 @@ impl eframe::App for App {
                 });
             if !open {
                 self.pending_selection = None; // window X = cancel
+            }
+        }
+        if self.about_open {
+            let mut open = true;
+            egui::Window::new("About viewfrx")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.image((self.logo.id(), vec2(l::HEADER_LOGO, l::HEADER_LOGO)));
+                        ui.label(RichText::new("viewfrx").size(l::BRAND_FONT).strong());
+                        ui.label(
+                            RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                                .color(theme::AMBER),
+                        );
+                    });
+                    ui.label(
+                        RichText::new("/ JESDEV theme")
+                            .color(theme::MUTED)
+                            .size(l::SMALL_FONT),
+                    );
+                    ui.add_space(l::SPACE_SMALL);
+                    ui.label("CLI-first audio browser · native desktop GUI");
+                    ui.label(format!(
+                        "spectrogram feature: {}",
+                        if cfg!(feature = "spectrogram") {
+                            "on"
+                        } else {
+                            "off"
+                        }
+                    ));
+                    ui.label(format!("rustc {}", env!("CARGO_PKG_RUST_VERSION")));
+                    ui.add_space(l::SPACE_SMALL);
+                    ui.label(
+                        RichText::new("Repository: github.com/jesdev-io/viewfrx")
+                            .monospace()
+                            .size(l::SMALL_FONT),
+                    );
+                    ui.label(
+                        RichText::new("Logo/theme: JESDEV (bundled with provenance).")
+                            .color(theme::MUTED)
+                            .size(l::SMALL_FONT),
+                    );
+                });
+            if !open {
+                self.about_open = false;
             }
         }
         if self.debug_console {

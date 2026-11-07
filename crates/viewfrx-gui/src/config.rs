@@ -76,7 +76,6 @@ pub mod layout {
     pub const HEADER_PADDING: i8 = 14;
     pub const HEADER_LOGO: f32 = 36.0;
     pub const BRAND_FONT: f32 = 25.0;
-    pub const BRAND_SUBFONT: f32 = 12.0;
     pub const MICRO_FONT: f32 = 10.0;
     pub const SMALL_FONT: f32 = 11.0;
     pub const BODY_FONT: f32 = 14.0;

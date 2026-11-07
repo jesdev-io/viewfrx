@@ -133,7 +133,7 @@ See [architecture](docs/architecture.md), [references and branding](docs/referen
 
 ## CI and releases
 
-GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs fmt, clippy and the full test suite (both feature configurations) plus release builds on **Linux, Windows and macOS** on every push/PR to `main`/`dev`. Tagging `v*` publishes a GitHub release with per-platform binary archives; the source code is attached by GitHub automatically. The `dev` branch is the integration branch; `main` is aimed at releases.
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs fmt, clippy and the full test suite (both feature configurations) plus release builds on **Linux, Windows and macOS** on every push/PR to `main`/`dev`. Tagging `v*` (e.g. `git tag -a v0.1.0 && git push origin v0.1.0`) publishes a GitHub release with per-platform binary archives; the source code is attached by GitHub automatically. See [CHANGELOG.md](CHANGELOG.md). The `dev` branch is the integration branch; `main` is aimed at releases.
 
 ## Test and measure
 
