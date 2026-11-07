@@ -229,23 +229,35 @@ fn pad2(len: usize) -> usize {
 }
 
 /// Split a RIFF/WAVE file into (id, data) chunks; fails on malformed input so
-/// a write never harms a file it cannot parse.
+/// a write never harms a file it cannot parse. The RIFF size field is the
+/// authority for the container end; trailing bytes beyond it are ignored, and
+/// a missing pad byte after an odd-sized final chunk is tolerated (streaming
+/// writers often omit it).
 fn riff_chunks(bytes: &[u8]) -> Result<Vec<([u8; 4], Vec<u8>)>> {
+    if bytes.len() < 12 || !bytes.starts_with(b"RIFF") || bytes.get(8..12) != Some(b"WAVE") {
+        bail!("not a RIFF/WAVE file");
+    }
+    let riff_end =
+        (8 + u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize).min(bytes.len());
     let mut chunks = Vec::new();
     let mut pos = 12usize;
-    while pos + 8 <= bytes.len() {
+    while pos + 8 <= riff_end {
         let id: [u8; 4] = bytes[pos..pos + 4].try_into().unwrap();
         let size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
         let start = pos + 8;
         let end = start
             .checked_add(size)
-            .filter(|e| *e <= bytes.len())
+            .filter(|e| *e <= riff_end)
             .with_context(|| "truncated RIFF chunk")?;
         chunks.push((id, bytes[start..end].to_vec()));
-        pos = start + pad2(size);
-    }
-    if pos != bytes.len() {
-        bail!("trailing garbage after last RIFF chunk");
+        // Skip the pad byte after an odd-sized chunk only when more container
+        // bytes follow (the final chunk's pad is often omitted).
+        let pad = if size % 2 == 1 && end < riff_end {
+            1
+        } else {
+            0
+        };
+        pos = end + pad;
     }
     Ok(chunks)
 }
@@ -770,6 +782,61 @@ mod tests {
         // Saving onto itself is the atomic in-place write.
         save_as(&src, &src, &added)?;
         assert_eq!(read(&src)?, added);
+        Ok(())
+    }
+
+    #[test]
+    fn wav_with_odd_final_chunk_and_no_pad_byte_still_round_trips() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("odd.wav");
+        // Hand-build: fmt + data with ODD size (7999) and NO pad byte, RIFF
+        // size excluding the pad (as streaming writers emit).
+        let fmt = {
+            let mut f = Vec::new();
+            f.extend_from_slice(&1u16.to_le_bytes());
+            f.extend_from_slice(&1u16.to_le_bytes());
+            f.extend_from_slice(&8000u32.to_le_bytes());
+            f.extend_from_slice(&16000u32.to_le_bytes()); // byte rate
+            f.extend_from_slice(&2u16.to_le_bytes()); // block align
+            f.extend_from_slice(&16u16.to_le_bytes()); // bits
+            f
+        };
+        let data = vec![1u8; 7999];
+        let mut out = b"RIFF".to_vec();
+        let body = 4 + (8 + fmt.len()) + (8 + data.len());
+        out.extend_from_slice(&(body as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVE");
+        out.extend_from_slice(b"fmt ");
+        out.extend_from_slice(&(fmt.len() as u32).to_le_bytes());
+        out.extend_from_slice(&fmt);
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&data);
+        assert_eq!(out.len() % 2, 1, "fixture must be odd-sized at EOF");
+        fs::write(&path, &out)?;
+        let added = vec![Annotation {
+            seconds: 0.5,
+            text: "odd".into(),
+        }];
+        let stored = annotate(&path, &added)?;
+        assert_eq!(stored, added);
+        assert_eq!(read(&path)?, added);
+        // The rewritten file is padded and still decodes.
+        let now = fs::read(&path)?;
+        assert_eq!(now.len() % 2, 0);
+        let mut reader = AudioReader::open(&path)?;
+        let mut frame = [0.0f32; 1];
+        let mut count = 0;
+        while reader.next_frame(&mut frame)? {
+            count += 1;
+        }
+        assert_eq!(count, 3999); // 7999 bytes / 2 bytes per 16-bit frame
+        // Trailing bytes beyond the RIFF size are ignored, not fatal.
+        let mut with_junk = now.clone();
+        with_junk.extend_from_slice(b"JUNKJUNK");
+        let p2 = dir.path().join("junk.wav");
+        fs::write(&p2, &with_junk)?;
+        assert_eq!(annotate(&p2, &added)?, added);
         Ok(())
     }
 
