@@ -2,6 +2,11 @@
 
 All notable changes to viewfrx. Versions follow SemVer; releases are tagged `v*` and published by CI with per-platform binaries (Linux/Windows/macOS) plus source.
 
+## [0.1.2] - 2026-11-07
+
+- Add Linux `.deb`/AppImage, Windows MSI, and macOS DMG desktop packages to tagged releases (unsigned).
+- Keep the existing cross-platform portable archives as a fallback.
+
 ## [0.1.1] - 2026-11-07
 
 - Publish per-platform downloadable binary archives with SHA-256 checksums; include README and license.

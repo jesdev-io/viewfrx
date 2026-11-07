@@ -37,6 +37,35 @@ jobs:
         run: cargo test --workspace --features spectrogram --locked
       - name: Release build
         run: cargo build --release --workspace --features spectrogram --locked
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --version 0.11.8 --locked
+      - name: Install AppImage tooling
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL -o appimagetool.AppImage https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool.AppImage
+          sudo mv appimagetool.AppImage /usr/local/bin/appimagetool
+      - name: Build Linux desktop packages
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: cargo packager --release --packages viewfrx-gui --formats deb,appimage
+      - name: Build Windows MSI
+        if: runner.os == 'Windows'
+        run: cargo packager --release --packages viewfrx-gui --formats wix
+      - name: Build macOS DMG
+        if: runner.os == 'macOS'
+        run: cargo packager --release --packages viewfrx-gui --formats dmg
+      - name: Upload native desktop packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-packages-${{ matrix.os }}
+          path: |
+            target/release/bundle/*.deb
+            target/release/bundle/*.AppImage
+            target/release/bundle/*.msi
+            target/release/bundle/*.dmg
+          if-no-files-found: error
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
@@ -61,11 +90,18 @@ jobs:
         with:
           path: dist
           pattern: viewfrx-*
+      - name: Download native desktop packages
+        uses: actions/download-artifact@v4
+        with:
+          path: native-dist
+          pattern: native-packages-*
+          merge-multiple: true
       - name: Package per-platform archives
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release
+          cp native-dist/* release/
           for d in dist/viewfrx-*/; do
             os=$(basename "$d" | sed 's/^viewfrx-//')
             stage="release/viewfrx-$os"
@@ -81,7 +117,7 @@ jobs:
             fi
           done
           cd release
-          sha256sum viewfrx-*.* > SHA256SUMS
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           ls -la
       - name: Publish GitHub release (binaries + source code)
         uses: softprops/action-gh-release@v2
@@ -89,5 +125,9 @@ jobs:
           files: |
             release/*.tar.gz
             release/*.zip
+            release/*.deb
+            release/*.AppImage
+            release/*.msi
+            release/*.dmg
             release/SHA256SUMS
           generate_release_notes: true
