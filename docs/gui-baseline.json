@@ -15,7 +15,7 @@
     "waveform_bins": 2757
   },
   "total_seconds_including_3s_hold": 9.214,
-  "screenshot": "/tmp/frx-gui-10000.png",
+  "screenshot": "/tmp/viewfrx-gui-10000.png",
   "stderr_lines": 14,
   "note": "Native rendering/import/analysis smoke only. Keyboard and waveform-click routing are tested separately without audio hardware."
 }

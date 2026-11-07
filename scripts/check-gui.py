@@ -44,7 +44,7 @@ def demo_fixture(path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", type=Path, default=ROOT / "target/release/frxview-gui")
+    parser.add_argument("--binary", type=Path, default=ROOT / "target/release/viewviewfrx-gui")
     parser.add_argument("--screenshot", type=Path, help="Keep the rendered PNG at this path")
     parser.add_argument("--entries", type=int, default=10000)
     parser.add_argument("--demo", action="store_true", help="Use a generated stereo chirp/burst for the screenshot")
@@ -52,11 +52,11 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.entries <= 100000:
         parser.error("entries must be between 1 and 100000")
-    with tempfile.TemporaryDirectory(prefix="frxview-gui-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="viewviewfrx-gui-") as temporary:
         work = Path(temporary)
         sounds = work / "sounds"
         sounds.mkdir()
-        fixture = ROOT / "crates/frx-core/tests/fixtures/tone.mp3"
+        fixture = ROOT / "crates/viewfrx-core/tests/fixtures/tone.mp3"
         if args.demo:
             demo_fixture(sounds / "00000 - Stereo chirp.wav")
         else:
@@ -85,7 +85,7 @@ def main():
         assert width >= 900 and height >= 560, (width, height)
         catalog = json.loads((work / "library.json").read_text())
         assert catalog["roots"] == [str(sounds.resolve())]
-        assert list((work / "cache").glob("frx-waveform-*.json")), "Selected waveform never completed"
+        assert list((work / "cache").glob("viewfrx-waveform-*.json")), "Selected waveform never completed"
         print(json.dumps({"ok": True, "candidate_files": args.entries, "rendered_size": [width, height], "ui": report,
                           "total_seconds_including_3s_hold": round(time.perf_counter() - start, 3),
                           "screenshot": str(screenshot) if args.screenshot else "validated; temporary",

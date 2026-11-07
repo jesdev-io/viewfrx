@@ -1,0 +1,29 @@
+[package]
+name = "viewfrx-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "viewfrx-gui"
+path = "src/main.rs"
+
+[features]
+default = []
+spectrogram = ["viewfrx-core/spectrogram"]
+
+[dependencies]
+viewfrx-core = { path = "../viewfrx-core" }
+viewfrx-audio = { path = "../viewfrx-audio" }
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["webp", "png"] }
+
+tempfile.workspace = true
+
+[dev-dependencies]
+hound.workspace = true

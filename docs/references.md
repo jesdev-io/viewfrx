@@ -1,6 +1,6 @@
 # Reference notes
 
-Consulted 2026-11-05. These are design references, not benchmarks proving frxview's performance.
+Consulted 2026-11-05. These are design references, not benchmarks proving viewfrx's performance.
 
 ## ArtCraft identity and command parity
 
@@ -18,9 +18,9 @@ The [primary README](https://raw.githubusercontent.com/storytold/photocraft/main
 
 ## Normalization and spectral conventions
 
-- [Audacity Normalize](https://manual.audacityteam.org/man/normalize.html): peak amplitude targeting and linked stereo by default, preserving channel balance. frxview implements this peak-gain behavior with a −1 dBFS target; it does **not** claim Audacity's DC-offset removal or independent-channel options.
-- [Audacity Spectrogram Settings](https://manual.audacityteam.org/man/spectrogram_settings.html): FFT/window size and display gain/range distinguish analysis from visualization. frxview exposes FFT size and display floor, but currently uses a bounded linear-frequency overview rather than Audacity's complete editor/scales.
-- [RustFFT](https://docs.rs/rustfft/latest/rustfft/): planned forward FFT implementation; output is not automatically normalized. frxview explicitly applies Hann coherent-gain and one-sided amplitude calibration, validated with tones and a time-localized impulse.
+- [Audacity Normalize](https://manual.audacityteam.org/man/normalize.html): peak amplitude targeting and linked stereo by default, preserving channel balance. viewfrx implements this peak-gain behavior with a −1 dBFS target; it does **not** claim Audacity's DC-offset removal or independent-channel options.
+- [Audacity Spectrogram Settings](https://manual.audacityteam.org/man/spectrogram_settings.html): FFT/window size and display gain/range distinguish analysis from visualization. viewfrx exposes FFT size and display floor, but currently uses a bounded linear-frequency overview rather than Audacity's complete editor/scales.
+- [RustFFT](https://docs.rs/rustfft/latest/rustfft/): planned forward FFT implementation; output is not automatically normalized. viewfrx explicitly applies Hann coherent-gain and one-sided amplitude calibration, validated with tones and a time-localized impulse.
 
 The 300 ms exponential RMS envelope and 20 dB/s sample-peak release are documented engineering choices, not a claim of IEC VU conformance. See [analysis.md](analysis.md) for exact units and algorithms.
 
@@ -38,4 +38,4 @@ Source: `../jesdev/jesdev-io-website/docs/assets/stylesheets/jesdev.css` and `mk
 | Purple | `#a170d9` |
 | Burgundy | `#980825` |
 
-Selected site logo: `docs/assets/images/cropped-jesdev-logo-complex.webp`; additional vector wordmark: `docs/assets/images/jesdev_logo_text.drawio-1.svg`. Dark compact panels, strong headings, amber interaction accents; code font stack uses SourceCode and system monospace fallbacks. Do not port the website's large spacing, shadows or hero typography into a dense audio browser. The raster logo is bundled unchanged in `crates/frx-gui/assets/jesdev.webp` with provenance in that directory's README. Redistribution rights still need confirmation before publication.
+Selected site logo: `docs/assets/images/cropped-jesdev-logo-complex.webp`; additional vector wordmark: `docs/assets/images/jesdev_logo_text.drawio-1.svg`. Dark compact panels, strong headings, amber interaction accents; code font stack uses SourceCode and system monospace fallbacks. Do not port the website's large spacing, shadows or hero typography into a dense audio browser. The raster logo is bundled unchanged in `crates/viewfrx-gui/assets/jesdev.webp` with provenance in that directory's README. Redistribution rights still need confirmation before publication.

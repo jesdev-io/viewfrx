@@ -1,4 +1,4 @@
-# frxview
+# viewfrx
 
 A compact, CLI-first Rust audio browser with a **native desktop GUI**.
 
@@ -12,18 +12,18 @@ Rust 1.89+ is declared by the dependency graph; **locally verified with Rust 1.9
 # Debian/Ubuntu native build dependencies
 sudo apt install build-essential pkg-config libasound2-dev
 cargo build --release --locked
-./target/release/frxview --help
+./target/release/viewfrx --help
 ```
 
-The CLI binary is `target/release/frxview` (`frxview.exe` on Windows). Plain `cargo build`/`cargo run` still target the CLI only; build the whole workspace or select the GUI explicitly. Python and FFmpeg are optional test tools, not application runtime dependencies.
+The CLI binary is `target/release/viewfrx` (`viewfrx.exe` on Windows). Plain `cargo build`/`cargo run` still target the CLI only; build the whole workspace or select the GUI explicitly. Python and FFmpeg are optional test tools, not application runtime dependencies.
 
 ## Desktop app
 
 ```sh
-cargo run --release -p frx-gui --features spectrogram -- /path/to/recordings
+cargo run --release -p viewfrx-gui --features spectrogram -- /path/to/recordings
 # Or build both binaries with spectral analysis enabled:
 cargo build --release --workspace --features spectrogram --locked
-./target/release/frxview-gui
+./target/release/viewfrx-gui
 ```
 
 - **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use **+ Files**, **+ Folder**, the **File** menu, drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
@@ -50,35 +50,35 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 
 ```sh
 # Import validates and prints canonical roots; it does not persist a library.
-./target/release/frxview import /path/to/recordings
-./target/release/frxview list --recursive
+./target/release/viewfrx import /path/to/recordings
+./target/release/viewfrx list --recursive
 
 # You can also browse/play without importing first.
-./target/release/frxview list /path/to/recordings --recursive
-./target/release/frxview inspect '/path/to/recording.wav'
-./target/release/frxview devices
-./target/release/frxview play '/path/to/recording.wav' --gain 0.5
-./target/release/frxview play '/path/to/recording.mp3' --rate 1.5 --seconds 10
-./target/release/frxview waveform '/path/to/recording.wav'
-./target/release/frxview normalization '/path/to/recording.wav'
-./target/release/frxview play '/path/to/recording.wav' --normalize --gain-db -6
-./target/release/frxview play '/path/to/recording.wav' --highpass
-./target/release/frxview spectrogram '/path/to/recording.wav' --fft-size 2048
-./target/release/frxview levels '/path/to/recording.wav'
-./target/release/frxview waveform '/path/to/recording.wav' --stereo
-./target/release/frxview annotate '/path/to/recording.wav' '[00:00:12:00] thunder'
-./target/release/frxview annotate '/path/to/recording.wav' --seconds 42 'clap'
-./target/release/frxview annotate '/path/to/recording.wav' --output '/path/copy.wav' '[00:00:12:00] thunder'
-./target/release/frxview annotations '/path/to/recording.wav'
-./target/release/frxview spectrum '/path/to/recording.wav' --position 12.5
-./target/release/frxview spectrum '/path/to/recording.wav' --third-octave  # log-frequency 1/3-octave bands
-./target/release/frxview waveform '/path/to/recording.wav' --from 10 --to 20
+./target/release/viewfrx list /path/to/recordings --recursive
+./target/release/viewfrx inspect '/path/to/recording.wav'
+./target/release/viewfrx devices
+./target/release/viewfrx play '/path/to/recording.wav' --gain 0.5
+./target/release/viewfrx play '/path/to/recording.mp3' --rate 1.5 --seconds 10
+./target/release/viewfrx waveform '/path/to/recording.wav'
+./target/release/viewfrx normalization '/path/to/recording.wav'
+./target/release/viewfrx play '/path/to/recording.wav' --normalize --gain-db -6
+./target/release/viewfrx play '/path/to/recording.wav' --highpass
+./target/release/viewfrx spectrogram '/path/to/recording.wav' --fft-size 2048
+./target/release/viewfrx levels '/path/to/recording.wav'
+./target/release/viewfrx waveform '/path/to/recording.wav' --stereo
+./target/release/viewfrx annotate '/path/to/recording.wav' '[00:00:12:00] thunder'
+./target/release/viewfrx annotate '/path/to/recording.wav' --seconds 42 'clap'
+./target/release/viewfrx annotate '/path/to/recording.wav' --output '/path/copy.wav' '[00:00:12:00] thunder'
+./target/release/viewfrx annotations '/path/to/recording.wav'
+./target/release/viewfrx spectrum '/path/to/recording.wav' --position 12.5
+./target/release/viewfrx spectrum '/path/to/recording.wav' --third-octave  # log-frequency 1/3-octave bands
+./target/release/viewfrx waveform '/path/to/recording.wav' --from 10 --to 20
 ```
 
 - Results are JSON; `list` emits one JSON object per file. Application errors go to stderr with a nonzero exit code; Clap usage errors use its standard text output.
 - Listing filters by extension; `inspect` and `play` validate the codec/container. Nested directories require `--recursive`; `--sort` enables alphabetical order within each directory. Directory symlinks are not followed. Overlapping imported roots can yield duplicate listing entries.
 - `list` without a path browses the working directory, never a saved library. `import` only validates/emits roots; it does not retain them.
-- Waveforms use an automatically removed temporary cache; explicitly retain artifacts with `waveform --cache DIR`. `--bins` accepts powers of two from 2 to 65536. The cache budget is 64 MiB and eviction only touches frxview-owned entries.
+- Waveforms use an automatically removed temporary cache; explicitly retain artifacts with `waveform --cache DIR`. `--bins` accepts powers of two from 2 to 65536. The cache budget is 64 MiB and eviction only touches viewfrx-owned entries.
 - Manual gain accepts linear `--gain` (0–4, 1 is unity) or `--gain-db`. Output is clamped to [-1, 1] and clipped samples are counted.
 - `--normalize` applies linked-channel sample-peak gain to reach −1 dBFS **before manual gain**, computed on the **DC-removed** signal. It preserves stereo balance and leaves silence unchanged. This is not loudness/true-peak normalization. The CLI computes or loads peak analysis before starting; the GUI waits without blocking its event loop and never starts normalized playback at an unanalysed gain.
 - Playback always removes DC offset with a one-pole DC blocker and applies a short onset/offset fade (anti dirac-pop). `--highpass` additionally enables a fixed 20 Hz highpass against infra-sound. `levels` reports the per-channel DC offset in linear and dBFS, raw and DC-removed peaks, and the normalization. `benchmark --highpass` applies the same chain.
@@ -92,7 +92,7 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 ## Persistent control session
 
 ```sh
-./target/release/frxview session
+./target/release/viewfrx session
 ```
 
 Reads one JSON object per line from stdin and replies with one JSON object per line on stdout. Paths containing spaces need only normal JSON quoting. Send these interactively or from a process controlling stdin/stdout:
@@ -122,14 +122,18 @@ A missing/corrupt file produces an asynchronous error in status; a later success
 
 | Crate | Responsibility |
 |---|---|
-| `frx-core` | Discovery, decoding/metadata, level conventions, waveform and optional spectral caches |
-| `frx-audio` | Typed transport, deterministic renderer, decoder worker, CPAL callback |
-| `frx-cli` | Clap and JSON-lines adapters |
-| `frx-gui` | egui views, background adapters, generation-aware browser/analysis state |
+| `viewfrx-core` | Discovery, decoding/metadata, level conventions, waveform and optional spectral caches |
+| `viewfrx-audio` | Typed transport, deterministic renderer, decoder worker, CPAL callback |
+| `viewfrx-cli` | Clap and JSON-lines adapters |
+| `viewfrx-gui` | egui views, background adapters, generation-aware browser/analysis state |
 
 Audio streams through an 8192-frame SPSC ring. Decoding, resampling, file opening, and seeking run on a worker; the callback does no disk I/O, decoding, allocation, logging, or mutex locking. Old-generation frames are discarded after seek/switch. Whole recordings are not loaded into memory.
 
 See [architecture](docs/architecture.md), [references and branding](docs/references.md), and [remaining work](docs/roadmap.md). `goal.md` is the user-maintained brief and is never edited by implementation work. Production tuning constants live in each crate's `src/config.rs`; GUI colors live in `theme.rs`.
+
+## CI and releases
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs fmt, clippy and the full test suite (both feature configurations) plus release builds on **Linux, Windows and macOS** on every push/PR to `main`/`dev`. Tagging `v*` publishes a GitHub release with per-platform binary archives; the source code is attached by GitHub automatically. The `dev` branch is the integration branch; `main` is aimed at releases.
 
 ## Test and measure
 
@@ -139,10 +143,10 @@ cargo clippy --workspace --all-targets --features spectrogram --locked -- -D war
 cargo test --workspace --features spectrogram --locked
 cargo test --workspace --no-default-features --locked
 cargo build --release --workspace --features spectrogram --locked
-./target/release/frxview benchmark '/path/to/recording.wav'
+./target/release/viewfrx benchmark '/path/to/recording.wav'
 python3 scripts/check-performance.py
 python3 scripts/check-performance.py --audio --spectrogram  # MUTED real-device smoke test
-python3 scripts/check-gui.py --expect-spectrogram --demo --screenshot /tmp/frxview.png  # needs a display
+python3 scripts/check-gui.py --expect-spectrogram --demo --screenshot /tmp/viewfrx.png  # needs a display
 ```
 
 Unit/integration tests do not require an audio device. WAV fixtures are generated in temporary directories; the tiny synthetic MP3 fixture is committed with its generation command. The performance script generates 60-second and 600-second WAVs and 10,000 directory entries, then removes them. FFmpeg is optional and enables an additional generated MP3 benchmark. The optional device test uses POSIX pipe polling, gain zero, and never deliberately plays the synthetic tone audibly.

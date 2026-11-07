@@ -1156,64 +1156,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "frx-audio"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cpal",
- "frx-core",
- "hound",
- "rtrb",
- "serde",
- "tempfile",
-]
-
-[[package]]
-name = "frx-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "frx-audio",
- "frx-core",
- "hound",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "frx-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "blake3",
- "hound",
- "rustfft",
- "serde",
- "serde_json",
- "symphonia",
- "tempfile",
- "walkdir",
-]
-
-[[package]]
-name = "frx-gui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "eframe",
- "frx-audio",
- "frx-core",
- "hound",
- "image",
- "rfd",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3442,6 +3384,64 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "viewfrx-audio"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cpal",
+ "hound",
+ "rtrb",
+ "serde",
+ "tempfile",
+ "viewfrx-core",
+]
+
+[[package]]
+name = "viewfrx-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hound",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "viewfrx-audio",
+ "viewfrx-core",
+]
+
+[[package]]
+name = "viewfrx-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "hound",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
+name = "viewfrx-gui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "eframe",
+ "hound",
+ "image",
+ "rfd",
+ "serde_json",
+ "tempfile",
+ "viewfrx-audio",
+ "viewfrx-core",
+]
 
 [[package]]
 name = "walkdir"

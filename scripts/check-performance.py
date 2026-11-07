@@ -35,12 +35,12 @@ def main():
     parser.add_argument("--audio", action="store_true")
     parser.add_argument("--spectrogram", action="store_true", help="Benchmark the optional spectrogram feature")
     parser.add_argument("--device", type=int)
-    parser.add_argument("--binary", type=Path, default=ROOT / "target/release/frxview")
+    parser.add_argument("--binary", type=Path, default=ROOT / "target/release/viewfrx")
     args = parser.parse_args()
     binary = str(args.binary.resolve())
     report = {"platform": platform.platform(), "cpu": platform.processor(),
               "note": "Local warm filesystem; cold/warm refer to waveform analysis cache, not OS page cache."}
-    with tempfile.TemporaryDirectory(prefix="frxview-bench-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="viewfrx-bench-") as temporary:
         tmp = Path(temporary)
         short, long = tmp / "60s.wav", tmp / "600s.wav"
         fixture(short, 60)
@@ -82,7 +82,7 @@ def main():
         report["list_10000"] = {"ms": (time.perf_counter() - start) * 1000, "entries": len(result.stdout.splitlines())}
         assert report["list_10000"]["entries"] == 10000
         report["binary_bytes"] = os.path.getsize(binary)
-        gui = ROOT / "target/release/frxview-gui"
+        gui = ROOT / "target/release/viewviewfrx-gui"
         if gui.exists():
             report["gui_binary_bytes"] = os.path.getsize(gui)
         if Path("/usr/bin/time").exists():
@@ -174,7 +174,7 @@ def main():
                         wait(lambda s: s["rendered_generation"] > previous)
                     # Exercise natural EOF on a real callback, not only offline rendering.
                     previous = request("status")["generation"]
-                    request("play", path=str(ROOT / "crates/frx-core/tests/fixtures/tone.mp3"))
+                    request("play", path=str(ROOT / "crates/viewfrx-core/tests/fixtures/tone.mp3"))
                     wait(lambda s: s["generation"] > previous and s["state"] == "ended")
                     request("stop")
                     wait(lambda s: s["state"] == "stopped")

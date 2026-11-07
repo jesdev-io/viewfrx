@@ -1,0 +1,27 @@
+[package]
+name = "viewfrx-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "viewfrx"
+path = "src/main.rs"
+
+[features]
+default = []
+spectrogram = ["viewfrx-core/spectrogram"]
+
+[dependencies]
+viewfrx-core = { path = "../viewfrx-core" }
+viewfrx-audio = { path = "../viewfrx-audio" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+
+tempfile.workspace = true
+
+[dev-dependencies]
+hound.workspace = true

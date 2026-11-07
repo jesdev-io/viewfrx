@@ -17,7 +17,7 @@
     "waveform_bins": 2757
   },
   "total_seconds_including_3s_hold": 3.364,
-  "screenshot": "/tmp/frx-spectrogram-final.png",
+  "screenshot": "/tmp/viewfrx-spectrogram-final.png",
   "stderr_lines": 14,
   "note": "Native rendering/import/analysis smoke only. Keyboard and waveform-click routing are tested separately without audio hardware."
 }

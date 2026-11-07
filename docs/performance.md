@@ -51,8 +51,8 @@ Measured 2026-11-07, Rust 1.95 release build (`--workspace --features spectrogra
 
 | Metric | Observation |
 |---|---:|
-| CLI binary (`frxview`) | ~5.0 MiB |
-| GUI binary (`frxview-gui`, egui/eframe + glow) | ~16 MiB |
+| CLI binary (`viewfrx`) | ~5.0 MiB |
+| GUI binary (`viewfrx-gui`, egui/eframe + glow) | ~16 MiB |
 | Peak RSS, decode 600 s stereo WAV (110 MiB file) | ~5.6 MiB |
 | Peak RSS, waveform analysis of the same file | ~5.5 MiB |
 | Peak RSS, spectrogram analysis of the same file | ~10 MiB |
@@ -75,6 +75,6 @@ python3 scripts/check-performance.py --audio --device 1
 
 The script generates fixtures in a temporary directory and deletes them on exit. It checks gapless MP3 duration when FFmpeg is available and records memory with `/usr/bin/time` when present. The optional real-device test is POSIX-only; standard Rust tests are hardware-independent.
 
-Filesystem pages are warm from fixture creation: **“cold” above means an empty frxview analysis cache, not a cold OS cache**. Process startup and JSON serialization are included in list/waveform wall time. Audio latency includes JSON transport and ~1 ms status polling; it excludes hardware/DAC latency. Device open time is not included in switch/seek timing. No CPU-load stress, external drive, network drive, Windows, or macOS measurements have been made yet.
+Filesystem pages are warm from fixture creation: **“cold” above means an empty viewfrx analysis cache, not a cold OS cache**. Process startup and JSON serialization are included in list/waveform wall time. Audio latency includes JSON transport and ~1 ms status polling; it excludes hardware/DAC latency. Device open time is not included in switch/seek timing. No CPU-load stress, external drive, network drive, Windows, or macOS measurements have been made yet.
 
 Future acceptance should use repeated p50/p95/p99 measurements over diverse real files, background CPU/I/O load, device loss, and explicit audible/loopback latency measurements—not a single hardcoded timing threshold in unit tests.

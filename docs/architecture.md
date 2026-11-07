@@ -2,10 +2,10 @@
 
 ## Boundaries
 
-- `frx-core`: filesystem discovery, streaming decoding/probing, level/normalization conventions, timestamp annotations in file metadata, cached waveform and optional spectral analysis. No device, UI, or argument-parsing dependencies.
-- `frx-audio`: typed transport commands, streaming preview engine, CPAL device adapter. No CLI or UI dependencies.
-- `frx-cli`: Clap and JSON-lines adapters.
-- `frx-gui`: egui views and background adapters over the same Rust APIs, never subprocess playback.
+- `viewfrx-core`: filesystem discovery, streaming decoding/probing, level/normalization conventions, timestamp annotations in file metadata, cached waveform and optional spectral analysis. No device, UI, or argument-parsing dependencies.
+- `viewfrx-audio`: typed transport commands, streaming preview engine, CPAL device adapter. No CLI or UI dependencies.
+- `viewfrx-cli`: Clap and JSON-lines adapters.
+- `viewfrx-gui`: egui views and background adapters over the same Rust APIs, never subprocess playback.
 
 Four focused crates, not a generic plugin/command framework.
 
@@ -31,7 +31,7 @@ The audio ring provides bounded read-ahead for the current file. Speculative nex
 
 ## GUI responsiveness
 
-CPAL stream ownership stays on an audio-service thread (including open, reconfigure and drop), avoiding platform-specific `Stream: Send` assumptions. Views submit typed `frx_audio::Command` values over a bounded queue and read latest snapshots with `try_lock`. Engine status mutexes never reach the GUI or realtime callback.
+CPAL stream ownership stays on an audio-service thread (including open, reconfigure and drop), avoiding platform-specific `Stream: Send` assumptions. Views submit typed `viewfrx_audio::Command` values over a bounded queue and read latest snapshots with `try_lock`. Engine status mutexes never reach the GUI or realtime callback.
 
 Scan results arrive in 128-entry batches through an eight-slot queue; at most eight batches are processed per UI update. The display caps at 100,000 candidates and virtualizes rows. Filtering is incremental for incoming batches, and recomputed in memory on query edits. Workers deduplicate imported roots' results and apply alphabetical per-directory traversal. Selection has its own generation and analysis worker, so it does not wait behind a whole-library scan. Old metadata/waveforms/spectral images cannot overwrite newer selections or display settings. Normalized audition is held as a cancellable UI intent until a source peak exists; pending seek targets are preserved and Stop/device/selection changes cancel the intent. The UI performs no scanning, source-file I/O, decoding or device opening.
 

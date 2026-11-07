@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/frx-core", "crates/frx-audio", "crates/frx-cli", "crates/frx-gui"]
-default-members = ["crates/frx-cli"]
+members = ["crates/viewfrx-core", "crates/viewfrx-audio", "crates/viewfrx-cli", "crates/viewfrx-gui"]
+default-members = ["crates/viewfrx-cli"]
 resolver = "2"
 
 [workspace.package]
