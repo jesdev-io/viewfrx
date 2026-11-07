@@ -657,11 +657,11 @@ pub fn transport_button(ui: &mut egui::Ui, symbol: TransportSymbol, filled: bool
             let r = h;
             painter.line_segment(
                 [pos2(c.x - r, c.y - r), pos2(c.x + r, c.y + r)],
-                Stroke::new(2.0, ink),
+                Stroke::new(2.0f32, ink),
             );
             painter.line_segment(
                 [pos2(c.x - r, c.y + r), pos2(c.x + r, c.y - r)],
-                Stroke::new(2.0, ink),
+                Stroke::new(2.0f32, ink),
             );
         }
         TransportSymbol::Prev | TransportSymbol::Next => {
