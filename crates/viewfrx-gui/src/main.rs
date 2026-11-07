@@ -65,7 +65,7 @@ fn main() -> eframe::Result {
         eprintln!("--smoke-seconds must be between 1 and 120");
         std::process::exit(2);
     }
-    let icon = theme::logo();
+    let icon = theme::icon();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("viewfrx · JESDEV")

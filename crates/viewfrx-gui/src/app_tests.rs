@@ -485,11 +485,13 @@ fn scroll_wheel_over_waveform_zooms_around_cursor() {
         });
     });
     let zoom = app.zoom.expect("scroll wheel must zoom in");
-    // Cursor at 75% of a 10 s file: the window centers toward 7.5 s but is
-    // clamped at the file end (end == 10), shifting the center a bit left.
-    let center = (zoom.start + zoom.end) / 2.0;
-    assert!(center > 6.0 && center <= 7.5 + 1e-9, "center {center}");
-    assert!((zoom.end - 10.0).abs() < 1e-9, "end {}", zoom.end);
+    // Cursor at 75% of a 10 s file: preserve the 7.5 s timestamp at 75%
+    // of the new window rather than moving it to the window's center.
+    assert!(
+        (zoom.time_to_fraction(7.5) - 0.75).abs() < 1e-6,
+        "cursor timestamp moved to fraction {}",
+        zoom.time_to_fraction(7.5)
+    );
     // One wheel notch is a gentle view-relative scale, not a 2x cut.
     assert!(
         zoom.len() < 10.0 && zoom.len() > 10.0 / 2.0,

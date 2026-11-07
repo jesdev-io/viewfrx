@@ -110,8 +110,15 @@ jobs:
               if [[ -f "$d/$binary" ]]; then cp "$d/$binary" "$stage/"; fi
             done
             cp README.md LICENSE "$stage/"
-            if [[ "$os" == "Windows" ]]; then
-              (cd release && 7z a -tzip "viewfrx-$os.zip" "viewfrx-$os" >/dev/null)
+            if [[ "$os" == windows-* ]]; then
+              python3 - "$stage" "release/viewfrx-$os.zip" <<'PY'
+          import pathlib, sys, zipfile
+          root = pathlib.Path(sys.argv[1])
+          with zipfile.ZipFile(sys.argv[2], "w", zipfile.ZIP_DEFLATED) as archive:
+              for path in root.rglob("*"):
+                  if path.is_file():
+                      archive.write(path, path.relative_to(root.parent))
+          PY
             else
               tar -czf "release/viewfrx-$os.tar.gz" -C release "viewfrx-$os"
             fi
