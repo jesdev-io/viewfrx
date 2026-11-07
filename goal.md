@@ -1,4 +1,4 @@
-# `frxview`: A lightning fast audio file browser
+# `viewfrx`: A lightning fast audio file browser
 
 ## Goal
 The goal of this app is to be a vibe-coded, backed-by-reference, super fast, compact, easy to use app for browsing and listening to audio files (`.wav`, `.mp3`, ...) written in **rust**. Why is this needed? Because in scenarios where lots of data is browsed according to human metrics such as personal taste, speed is key: Imagine a gignatic database of field recordings or foley sounds. To find a fitting audio scene, a human curator needs to be able to quickly get the gist of the sound both in terms of technical and meta data and in feel. The second can be provided by super fast, immideate playback and super responsive jumps along the audio file, proper speed-up implementation and an overall snappy feel.
