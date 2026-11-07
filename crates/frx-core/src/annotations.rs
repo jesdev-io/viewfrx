@@ -161,21 +161,7 @@ pub fn annotate(path: &Path, new: &[Annotation]) -> Result<Vec<Annotation>> {
 /// Replace the stored annotations wholesale (used by tests and sync paths).
 pub fn write(path: &Path, annotations: &[Annotation]) -> Result<()> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    let updated = if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
-        write_wav(&bytes, annotations)?
-    } else if path
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("mp3"))
-        || bytes.starts_with(b"ID3")
-        || bytes.first().is_some_and(|b| *b == 0xFF)
-    {
-        write_mp3(&bytes, annotations)?
-    } else {
-        bail!(
-            "annotation metadata is only supported for WAV and MP3 files: {}",
-            path.display()
-        );
-    };
+    let updated = transform_bytes(path, &bytes, annotations)?;
     // Atomic replace: readers either see the old or the new file, never a mix.
     let parent = path
         .parent()
@@ -185,6 +171,46 @@ pub fn write(path: &Path, annotations: &[Annotation]) -> Result<()> {
     temp.write_all(&updated)?;
     temp.flush()?;
     temp.persist(path).map_err(|e| e.error)?;
+    Ok(())
+}
+
+/// Transform a file's bytes so its metadata carries exactly `annotations`.
+fn transform_bytes(path: &Path, bytes: &[u8], annotations: &[Annotation]) -> Result<Vec<u8>> {
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
+        write_wav(bytes, annotations)
+    } else if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("mp3"))
+        || bytes.starts_with(b"ID3")
+        || bytes.first().is_some_and(|b| *b == 0xFF)
+    {
+        write_mp3(bytes, annotations)
+    } else {
+        bail!(
+            "annotation metadata is only supported for WAV and MP3 files: {}",
+            path.display()
+        );
+    }
+}
+
+/// Save the annotations to `dst` (the GUI "save as" dialog target), leaving
+/// the source file untouched unless dst is the same file. The audio data is
+/// copied byte-for-byte; only the metadata chunk/tag changes.
+pub fn save_as(src: &Path, dst: &Path, annotations: &[Annotation]) -> Result<()> {
+    if src.canonicalize().ok() == dst.canonicalize().ok() && dst.exists() {
+        return write(src, annotations);
+    }
+    let bytes = fs::read(src).with_context(|| format!("read {}", src.display()))?;
+    let updated = transform_bytes(src, &bytes, annotations)?;
+    let parent = dst
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.write_all(&updated)?;
+    temp.flush()?;
+    temp.persist(dst).map_err(|e| e.error)?;
     Ok(())
 }
 
@@ -647,6 +673,31 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 11025);
+        Ok(())
+    }
+
+    #[test]
+    fn save_as_writes_a_copy_and_leaves_the_source_untouched() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let src = dir.path().join("src.wav");
+        wav_fixture(&src, 400)?;
+        let before = fs::read(&src)?;
+        let dst = dir.path().join("copy.wav");
+        let added = vec![Annotation { seconds: 1.0, text: "note".into() }];
+        save_as(&src, &dst, &added)?;
+        assert_eq!(fs::read(&src)?, before, "source must be untouched");
+        assert_eq!(read(&dst)?, added);
+        // Still a normal playable file.
+        let mut reader = AudioReader::open(&dst)?;
+        let mut frame = [0.0f32; 2];
+        let mut count = 0;
+        while reader.next_frame(&mut frame)? {
+            count += 1;
+        }
+        assert_eq!(count, 400);
+        // Saving onto itself is the atomic in-place write.
+        save_as(&src, &src, &added)?;
+        assert_eq!(read(&src)?, added);
         Ok(())
     }
 

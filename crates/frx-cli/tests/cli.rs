@@ -448,3 +448,29 @@ fn spectrum_and_zoom_windows_match_analysis_conventions() {
     );
     assert!(cols < 512);
 }
+
+#[test]
+fn annotate_with_output_saves_a_copy_and_leaves_the_original() {
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let file = "with spaces.WAV";
+    let before = std::fs::read(dir.path().join(file)).unwrap();
+    let out = dir.path().join("annotated copy.WAV");
+    let result = success(run(
+        dir.path(),
+        &["annotate", file, "--output", "annotated copy.WAV", "[00:00:00:07] hit"],
+    ));
+    assert_eq!(result["annotations"].as_array().unwrap().len(), 1);
+    assert_eq!(result["annotations"][0]["seconds"], 7.0);
+    // Original untouched; the copy carries the marker and stays playable.
+    assert_eq!(std::fs::read(dir.path().join(file)).unwrap(), before);
+    let listed = success(run(dir.path(), &["annotations", "annotated copy.WAV"]));
+    assert_eq!(listed["annotations"].as_array().unwrap().len(), 1);
+    let info = success(run(dir.path(), &["inspect", "annotated copy.WAV"]));
+    assert_eq!(info["sample_rate"], 8000);
+    // In-place annotate still works and is idempotent.
+    let first = success(run(dir.path(), &["annotate", file, "[00:00:00:07] hit"]));
+    let second = success(run(dir.path(), &["annotate", file, "[00:00:00:07] hit"]));
+    assert_eq!(first["annotations"], second["annotations"]);
+    assert_eq!(first["annotations"].as_array().unwrap().len(), 1);
+}

@@ -281,12 +281,13 @@ fn actual_waveform_click_maps_to_timeline_position() {
 }
 
 #[test]
-fn annotation_text_field_and_right_click_write_file_metadata_idempotently() {
+fn annotations_are_floating_until_saved_and_switching_warns() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.wav");
-    {
+    let other = dir.path().join("b.wav");
+    for p in [&path, &other] {
         let mut w = hound::WavWriter::create(
-            &path,
+            p,
             hound::WavSpec {
                 channels: 2,
                 sample_rate: 8000,
@@ -313,23 +314,10 @@ fn annotation_text_field_and_right_click_write_file_metadata_idempotently() {
         bits_per_sample: Some(16),
         tags: vec![],
     });
-    // Wait until the file worker's writes are reflected in the app state.
-    fn deliver_file_events(app: &mut App, ctx: &egui::Context, expected: usize) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            app.poll(ctx);
-            if app.annotations.len() == expected && !app.annotation_text.is_empty() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        panic!("expected {expected} annotations, got {:?}", app.annotations);
-    }
-    // Text-field entry: "[dd:hh:mm:ss] note" is written to the file metadata.
+    // Text-field entry: floating only, nothing written to disk yet.
     app.annotation_text = "[00:00:00:02] hello".into();
     app.submit_annotation_text();
-    assert!(app.file_id > 0);
-    deliver_file_events(&mut app, &ctx, 1);
+    assert!(app.annotations_dirty);
     assert_eq!(
         app.annotations,
         vec![Annotation {
@@ -337,14 +325,13 @@ fn annotation_text_field_and_right_click_write_file_metadata_idempotently() {
             text: "hello".into()
         }]
     );
-    // The stored annotations render back into the text field.
     assert_eq!(app.annotation_text, "[00:00:00:02] hello");
-    // Re-submitting the same line is idempotent.
-    app.submit_annotation_text();
-    deliver_file_events(&mut app, &ctx, 1);
-    assert_eq!(app.annotations.len(), 1);
-    // Right-click at 3/4 of the 1 s plot creates a marker there (rounded to
-    // whole seconds by the [dd:hh:mm:ss] format).
+    assert_eq!(
+        frx_core::annotations::read(&path).unwrap(),
+        Vec::new(),
+        "floating annotations must not touch the file"
+    );
+    // Right-click at 3/4 of the 1 s plot adds a position marker (floating).
     let mut rect = egui::Rect::NOTHING;
     let _ = ctx.run(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -372,16 +359,53 @@ fn annotation_text_field_and_right_click_write_file_metadata_idempotently() {
             });
         });
     }
-    deliver_file_events(&mut app, &ctx, 2);
     assert_eq!(app.annotations.len(), 2);
-    assert!(app.annotations.contains(&Annotation {
-        seconds: 1.0,
-        text: String::new()
-    }));
-    // The file still decodes and carries the markers in its tags.
-    assert_eq!(frx_core::annotations::read(&path).unwrap(), app.annotations);
-    // Invalid text surfaces an error and writes nothing.
+    assert!(app.annotations.contains(&Annotation { seconds: 1.0, text: String::new() }));
+    // Re-submitting the same line is idempotent.
+    app.annotation_text = "[00:00:00:02] hello".into();
+    app.submit_annotation_text();
+    assert_eq!(app.annotations.len(), 2);
+    // Switching files with unsaved changes asks first instead of selecting.
+    app.select(other.clone(), false);
+    assert_eq!(app.pending_selection.as_ref().map(|(p, _)| p), Some(&other));
+    assert_eq!(app.browser.selected, Some(path.clone()));
+    // Dismiss = annotations lost, selection proceeds.
+    app.annotations = app.saved_annotations.clone();
+    app.annotations_dirty = false;
+    app.proceed_pending_selection();
+    assert_eq!(app.browser.selected, Some(other.clone()));
+    assert!(app.pending_selection.is_none());
+    // Select the original again and save explicitly (in place).
+    app.select(path.clone(), false);
+    app.annotation_text = "[00:00:00:02] hello".into();
+    app.submit_annotation_text();
+    assert!(app.annotations_dirty);
+    app.save_annotations_to(path.clone());
+    assert!(app.file_id > 0);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        app.poll(&ctx);
+        if !app.annotations_dirty {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(!app.annotations_dirty);
+    assert_eq!(
+        frx_core::annotations::read(&path).unwrap(),
+        vec![Annotation {
+            seconds: 2.0,
+            text: "hello".into()
+        }]
+    );
+    // File still decodes normally.
+    assert_eq!(
+        frx_core::decode::inspect(&path).unwrap().frames,
+        Some(8000)
+    );
+    // Invalid text surfaces an error and changes nothing.
     app.annotation_text = "no marker".into();
     app.submit_annotation_text();
     assert!(app.error.is_some());
+    assert_eq!(app.annotations.len(), 1);
 }

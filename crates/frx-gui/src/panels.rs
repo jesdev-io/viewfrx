@@ -47,6 +47,16 @@ impl App {
                             self.rescan(Vec::new());
                             ui.close();
                         }
+                        if ui
+                            .add_enabled(
+                                self.annotations_dirty && self.browser.selected.is_some(),
+                                egui::Button::new("Save annotations (Ctrl+S)"),
+                            )
+                            .clicked()
+                        {
+                            self.request_save_dialog(ctx);
+                            ui.close();
+                        }
                         ui.separator();
                         if ui.button("Quit").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);

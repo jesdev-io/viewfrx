@@ -138,6 +138,10 @@ enum Action {
         /// Place the annotation at this time (seconds) instead of parsing markers.
         #[arg(long)]
         seconds: Option<f64>,
+        /// Save the annotated copy to this path instead of modifying the file
+        /// in place (the GUI save-dialog equivalent).
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
     /// List the timestamp annotations stored in a file's metadata.
     Annotations { path: PathBuf },
@@ -396,6 +400,7 @@ fn run() -> Result<()> {
             path,
             text,
             seconds,
+            output,
         } => {
             let new = if let Some(seconds) = seconds {
                 if !seconds.is_finite() || !(0.0..=MAX_SEEK_SECONDS).contains(&seconds) {
@@ -410,8 +415,23 @@ fn run() -> Result<()> {
                     &text.context("provide TEXT with [dd:hh:mm:ss] markers, or use --seconds")?,
                 )?
             };
-            let stored = annotations::annotate(&path, &new)?;
-            emit(&json!({"path": path, "annotations": annotations::to_json(&stored)}))?;
+            let stored = match &output {
+                Some(dst) => {
+                    let stored = annotations::read(&path)?;
+                    let mut merged = stored;
+                    annotations::merge(&mut merged, &new);
+                    annotations::save_as(&path, dst, &merged)?;
+                    vlog(format!(
+                        "saved annotated copy of {} to {} ({} marker(s))",
+                        path.display(),
+                        dst.display(),
+                        merged.len()
+                    ));
+                    merged
+                }
+                None => annotations::annotate(&path, &new)?,
+            };
+            emit(&json!({"path": path, "output": output, "annotations": annotations::to_json(&stored)}))?;
         }
         Action::Annotations { path } => {
             let stored = annotations::read(&path)?;

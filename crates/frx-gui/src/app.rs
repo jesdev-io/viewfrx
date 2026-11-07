@@ -42,7 +42,15 @@ pub struct App {
     files: FileService,
     file_id: u64,
     annotations: Vec<Annotation>,
+    /// What is actually stored in the file's metadata right now.
+    saved_annotations: Vec<Annotation>,
+    annotations_dirty: bool,
     annotation_text: String,
+    /// Selection waiting on the unsaved-annotations warning.
+    pending_selection: Option<(PathBuf, bool)>,
+    save_picker: Option<Receiver<Option<PathBuf>>>,
+    /// Proceed to pending_selection after the save dialog completes.
+    resume_selection: bool,
     highpass: bool,
     debug_console: bool,
     /// Shared time-zoom window (None = full recording) for all plots.
@@ -118,7 +126,12 @@ impl App {
             files: FileService::start(ctx.clone()),
             file_id: 0,
             annotations: Vec::new(),
+            saved_annotations: Vec::new(),
+            annotations_dirty: false,
             annotation_text: String::new(),
+            pending_selection: None,
+            save_picker: None,
+            resume_selection: false,
             highpass: c::HIGHPASS_DEFAULT,
             debug_console: args.debug_console,
             zoom: None,
@@ -305,6 +318,15 @@ impl App {
         }
     }
     fn select(&mut self, path: PathBuf, audition: bool) {
+        // Unsaved floating annotations: warn before switching files.
+        if self.annotations_dirty {
+            crate::logln!("unsaved annotations; asking before switching to {}", path.display());
+            self.pending_selection = Some((path, audition));
+            return;
+        }
+        self.select_now(path, audition);
+    }
+    fn select_now(&mut self, path: PathBuf, audition: bool) {
         crate::logln!("select {} (audition={audition})", path.display());
         self.request_analysis(path.clone());
         self.browser.selected = Some(path);
@@ -383,8 +405,11 @@ impl App {
             match event {
                 AnalysisEvent::Metadata(id, result) if id == self.analysis_id => match result {
                     Ok(info) => {
-                        // Annotations live in the file's own metadata tags.
-                        self.annotations = annotations::from_tags(&info.tags);
+                        // Annotations found on the file are rendered; new ones
+                        // stay floating (unsaved) until Ctrl+S / Save.
+                        self.saved_annotations = annotations::from_tags(&info.tags);
+                        self.annotations = self.saved_annotations.clone();
+                        self.annotations_dirty = false;
                         self.annotation_text = annotations::format_annotations(&self.annotations);
                         self.info = Some(info);
                     }
@@ -443,22 +468,69 @@ impl App {
             }
         }
         for _ in 0..r::ANALYSIS_QUEUE {
-            let Ok(FileEvent::AnnotationsWritten(id, result)) = self.files.rx.try_recv() else {
-                break;
-            };
-            if id != self.file_id {
-                continue;
+            let event = self.files.rx.try_recv();
+            let Ok(event) = event else { break };
+            match event {
+                FileEvent::AnnotationsWritten(id, result) if id == self.file_id => match result {
+                    Ok(list) => {
+                        crate::logln!("annotations written: {} marker(s)", list.len());
+                        self.annotations = list.clone();
+                        self.saved_annotations = list;
+                        self.annotations_dirty = false;
+                        self.annotation_text = annotations::format_annotations(&self.annotations);
+                    }
+                    Err(error) => {
+                        crate::logln!("annotation write failed: {error}");
+                        self.error = Some(error);
+                    }
+                },
+                FileEvent::AnnotationsSaved(id, result) if id == self.file_id => match result {
+                    Ok((dst, list)) => {
+                        crate::logln!(
+                            "annotations saved to {} ({} marker(s))",
+                            dst.display(),
+                            list.len()
+                        );
+                        let same = self
+                            .browser
+                            .selected
+                            .as_ref()
+                            .is_some_and(|src| src.canonicalize().ok() == dst.canonicalize().ok());
+                        self.annotations = list.clone();
+                        self.saved_annotations = list;
+                        self.annotations_dirty = false;
+                        self.annotation_text = annotations::format_annotations(&self.annotations);
+                        if same && let Some(path) = self.browser.selected.clone() {
+                            self.request_analysis(path); // refresh tags from disk
+                        }
+                        if self.resume_selection {
+                            self.resume_selection = false;
+                            self.proceed_pending_selection();
+                        }
+                    }
+                    Err(error) => {
+                        crate::logln!("annotation save failed: {error}");
+                        self.error = Some(error);
+                        self.resume_selection = false;
+                    }
+                },
+                _ => {}
             }
-            match result {
-                Ok(list) => {
-                    crate::logln!("annotations written: {} marker(s)", list.len());
-                    self.annotations = list;
-                    self.annotation_text = annotations::format_annotations(&self.annotations);
+        }
+        if let Some(rx) = &self.save_picker {
+            match rx.try_recv() {
+                Ok(Some(dst)) => {
+                    self.save_picker = None;
+                    self.save_annotations_to(dst);
                 }
-                Err(error) => {
-                    crate::logln!("annotation write failed: {error}");
-                    self.error = Some(error);
+                Ok(None) => {
+                    self.save_picker = None; // dialog cancelled: nothing saved
                 }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.save_picker = None;
+                    self.error = Some("Save dialog closed unexpectedly.".into());
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
             }
         }
         #[cfg(feature = "spectrogram")]
@@ -484,15 +556,62 @@ impl App {
         self.sync_normalization();
     }
     /// Merge annotations (from the text field or a right-click) into the
-    /// selected file's metadata on the file worker; idempotent.
+    /// current floating list; idempotent. Nothing is written to disk until
+    /// the user saves (Ctrl+S / File menu) — writes go through save dialog.
     fn add_annotations(&mut self, new: Vec<Annotation>) {
-        let Some(path) = self.browser.selected.clone() else {
-            return;
-        };
-        if new.is_empty() {
+        if new.is_empty() || self.browser.selected.is_none() {
             return;
         }
-        self.file_id = self.files.write_annotations(path, new);
+        let before = self.annotations.clone();
+        annotations::merge(&mut self.annotations, &new);
+        if self.annotations != before {
+            self.annotations_dirty = self.annotations != self.saved_annotations;
+            self.annotation_text = annotations::format_annotations(&self.annotations);
+            crate::logln!(
+                "annotation added (floating, {} unsaved change(s))",
+                self.annotations.len().saturating_sub(self.saved_annotations.len())
+            );
+        }
+    }
+    /// Open the standard save dialog (file naming + native overwrite warning)
+    /// to intentionally persist the floating annotations.
+    fn request_save_dialog(&mut self, ctx: &egui::Context) {
+        let Some(src) = self.browser.selected.clone() else {
+            return;
+        };
+        if self.save_picker.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.save_picker = Some(rx);
+        let name = src
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new()
+                .set_title("Save annotations into audio file")
+                .set_file_name(name)
+                .add_filter("Audio", frx_core::catalog::EXTENSIONS)
+                .save_file();
+            let _ = tx.send(picked);
+            ctx.request_repaint();
+        });
+    }
+    /// Persist the floating annotations to dst (in place when dst == source).
+    fn save_annotations_to(&mut self, dst: PathBuf) {
+        let Some(src) = self.browser.selected.clone() else {
+            return;
+        };
+        self.file_id = self
+            .files
+            .save_annotations_as(src, dst, self.annotations.clone());
+    }
+    fn proceed_pending_selection(&mut self) {
+        if let Some((path, audition)) = self.pending_selection.take() {
+            self.select_now(path, audition);
+        }
     }
     /// Bottom text field: "[dd:hh:mm:ss] note" entries become annotations.
     fn submit_annotation_text(&mut self) {
@@ -695,6 +814,13 @@ impl App {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.stop();
         }
+        let save = ctx.input(|i| {
+            i.key_pressed(egui::Key::S)
+                && (i.modifiers.command || i.modifiers.ctrl)
+        });
+        if save && self.annotations_dirty {
+            self.request_save_dialog(ctx);
+        }
     }
     fn diagnostic(&mut self, ctx: &egui::Context) {
         let Some(seconds) = self.smoke_seconds else {
@@ -793,6 +919,36 @@ impl eframe::App for App {
         self.browser_panel(ctx);
         self.settings(ctx);
         self.center(ctx);
+        if self.pending_selection.is_some() {
+            let mut open = true;
+            egui::Window::new("Unsaved annotations")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.label("The current recording has unsaved annotation changes.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Save…").clicked() {
+                            self.resume_selection = true;
+                            self.request_save_dialog(ctx);
+                        }
+                        if ui.button("Dismiss (lose changes)").clicked() {
+                            self.annotations = self.saved_annotations.clone();
+                            self.annotations_dirty = false;
+                            self.annotation_text =
+                                annotations::format_annotations(&self.annotations);
+                            self.proceed_pending_selection();
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.pending_selection = None;
+                        }
+                    });
+                });
+            if !open {
+                self.pending_selection = None; // window X = cancel
+            }
+        }
         if self.debug_console {
             egui::Window::new("Debug console")
                 .default_size(l::DEBUG_WINDOW_SIZE)

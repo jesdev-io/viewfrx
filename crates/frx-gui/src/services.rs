@@ -500,12 +500,19 @@ impl Drop for AnalysisService {
 /// egui update(). Results carry a generation so stale writes cannot clobber
 /// a newer selection.
 pub enum FileEvent {
+    /// In-place annotate finished; returns the full stored list.
     AnnotationsWritten(u64, Result<Vec<Annotation>, String>),
+    /// Save-as finished; returns (destination, stored list).
+    AnnotationsSaved(u64, Result<(PathBuf, Vec<Annotation>), String>),
+}
+enum FileJobKind {
+    Annotate { new: Vec<Annotation> },
+    SaveAs { dst: PathBuf, annotations: Vec<Annotation> },
 }
 struct FileJob {
     id: u64,
-    path: PathBuf,
-    new: Vec<Annotation>,
+    src: PathBuf,
+    kind: FileJobKind,
 }
 pub struct FileService {
     job: Arc<Mutex<Option<FileJob>>>,
@@ -529,18 +536,33 @@ impl FileService {
                     thread::sleep(Duration::from_millis(POLL_MS));
                     continue;
                 };
-                let cancelled =
-                    || stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != job.id;
-                let result = annotations::annotate(&job.path, &job.new).map_err(|e| {
-                    logln!("annotation write to {} failed: {e:#}", job.path.display());
-                    format!("{e:#}")
-                });
-                deliver(
-                    &tx,
-                    FileEvent::AnnotationsWritten(job.id, result),
-                    cancelled,
-                    &ctx,
-                );
+                let cancelled = || {
+                    stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != job.id
+                };
+                match job.kind {
+                    FileJobKind::Annotate { new } => {
+                        let result = annotations::annotate(&job.src, &new)
+                            .map_err(|e| format!("{e:#}"));
+                        deliver(
+                            &tx,
+                            FileEvent::AnnotationsWritten(job.id, result),
+                            cancelled,
+                            &ctx,
+                        );
+                    }
+                    FileJobKind::SaveAs { dst, annotations } => {
+                        let result = annotations::save_as(&job.src, &dst, &annotations)
+                            .and_then(|_| annotations::read(&dst))
+                            .map(|list| (dst, list))
+                            .map_err(|e| format!("{e:#}"));
+                        deliver(
+                            &tx,
+                            FileEvent::AnnotationsSaved(job.id, result),
+                            cancelled,
+                            &ctx,
+                        );
+                    }
+                }
             }
         });
         Self {
@@ -550,9 +572,24 @@ impl FileService {
             rx,
         }
     }
-    pub fn write_annotations(&self, path: PathBuf, new: Vec<Annotation>) -> u64 {
+    /// Merge annotations into the file in place (CLI-equivalent write).
+    pub fn write_annotations(&self, src: PathBuf, new: Vec<Annotation>) -> u64 {
         let id = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-        *self.job.lock().unwrap() = Some(FileJob { id, path, new });
+        *self.job.lock().unwrap() = Some(FileJob {
+            id,
+            src,
+            kind: FileJobKind::Annotate { new },
+        });
+        id
+    }
+    /// Save the given annotation list to dst (save dialog target).
+    pub fn save_annotations_as(&self, src: PathBuf, dst: PathBuf, annotations: Vec<Annotation>) -> u64 {
+        let id = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        *self.job.lock().unwrap() = Some(FileJob {
+            id,
+            src,
+            kind: FileJobKind::SaveAs { dst, annotations },
+        });
         id
     }
 }
