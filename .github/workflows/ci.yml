@@ -41,7 +41,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: viewfrx-${{ matrix.os }}
-          path: target/release/viewfrx*
+          path: |
+            target/release/viewfrx*
+            !target/release/*.d
+            !target/release/*.pdb
           if-no-files-found: error
 
   release:
@@ -58,14 +61,13 @@ jobs:
         with:
           path: dist
           pattern: viewfrx-*
-          merge-multiple: true
       - name: Package per-platform archives
         run: |
           mkdir -p release
-          for d in dist/viewfrx-*; do
+          for d in dist/viewfrx-*/; do
             os=$(basename "$d" | sed 's/viewfrx-//')
             mkdir -p "release/viewfrx-$os"
-            cp "$d"/* "release/viewfrx-$os/" 2>/dev/null || true
+            cp "$d"/viewfrx "$d"/viewfrx.exe "$d"/viewfrx-gui "$d"/viewfrx-gui.exe "release/viewfrx-$os/" 2>/dev/null || true
             tar -czf "release/viewfrx-$os.tar.gz" -C release "viewfrx-$os"
           done
           ls -la release
