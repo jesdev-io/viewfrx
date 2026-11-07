@@ -289,15 +289,15 @@ fn annotate_stores_timestamp_markers_in_file_metadata_idempotently() {
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
     let file = "with spaces.WAV";
-    // Text-field style: [dd:hh:mm:ss] free text.
+    // Text-field style: [hh:mm:ss:cc] free text.
     let first = success(run(
         dir.path(),
-        &["annotate", file, "[00:00:00:05] thunder starts"],
+        &["annotate", file, "[00:00:05:00] thunder starts"],
     ));
     let list = first["annotations"].as_array().unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["seconds"], 5.0);
-    assert_eq!(list[0]["timestamp"], "[00:00:00:05]");
+    assert_eq!(list[0]["timestamp"], "[00:00:05:00]");
     assert_eq!(list[0]["text"], "thunder starts");
     // Right-click style: explicit position; same position twice is idempotent.
     let second = success(run(
@@ -313,7 +313,7 @@ fn annotate_stores_timestamp_markers_in_file_metadata_idempotently() {
     // Re-entering the same text line does not duplicate either.
     let repeat = success(run(
         dir.path(),
-        &["annotate", file, "[00:00:00:05] thunder starts"],
+        &["annotate", file, "[00:00:05:00] thunder starts"],
     ));
     assert_eq!(repeat["annotations"].as_array().unwrap().len(), 2);
     // Listing reads them back from the file metadata.
@@ -492,7 +492,7 @@ fn annotate_with_output_saves_a_copy_and_leaves_the_original() {
             file,
             "--output",
             "annotated copy.WAV",
-            "[00:00:00:07] hit",
+            "[00:00:07:00] hit",
         ],
     ));
     assert_eq!(result["annotations"].as_array().unwrap().len(), 1);
@@ -504,8 +504,8 @@ fn annotate_with_output_saves_a_copy_and_leaves_the_original() {
     let info = success(run(dir.path(), &["inspect", "annotated copy.WAV"]));
     assert_eq!(info["sample_rate"], 8000);
     // In-place annotate still works and is idempotent.
-    let first = success(run(dir.path(), &["annotate", file, "[00:00:00:07] hit"]));
-    let second = success(run(dir.path(), &["annotate", file, "[00:00:00:07] hit"]));
+    let first = success(run(dir.path(), &["annotate", file, "[00:00:07:00] hit"]));
+    let second = success(run(dir.path(), &["annotate", file, "[00:00:07:00] hit"]));
     assert_eq!(first["annotations"], second["annotations"]);
     assert_eq!(first["annotations"].as_array().unwrap().len(), 1);
 }

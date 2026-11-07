@@ -243,6 +243,7 @@ impl View {
             widgets::start_marker(&painter, rect, start, window);
         }
         widgets::playhead(&painter, rect, position, window);
+        widgets::annotation_hover_preview(&response, rect, overlays.annotations, window);
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
     }
 }

@@ -41,7 +41,7 @@
 - DC offset reported in dBFS as a file parameter and removed during playback (DC blocker); normalization uses the DC-removed peak.
 - Short onset/offset anti-pop fades; optional fixed 20 Hz highpass toggle (CLI `play --highpass`, session `highpass`, GUI toggle).
 - Left/Right/Both selection for waveform and spectrogram, grouped as wave L/R and spec L/R; CLI `waveform/spectrogram --channel/--stereo`.
-- Timestamp annotations in the [dd:hh:mm:ss] format stored in WAV/MP3 file metadata (atomic, non-destructive, idempotent); CLI `annotate`/`annotations` plus session ops; GUI text field + right-click markers + plot lines.
+- Timestamp annotations in the [hh:mm:ss:cc] format stored in WAV/MP3 file metadata (atomic, non-destructive, idempotent); CLI `annotate`/`annotations` plus session ops; GUI text field + right-click markers + plot lines.
 - Symbol transport buttons, top-bar menu exporting main CLI actions, debug console window (GUI) and `--verbose` log lines (CLI).
 - Stateless sessions: no catalog persistence, temporary default analysis caches.
 

@@ -596,7 +596,7 @@ impl App {
             );
         }
     }
-    /// Automatic parsing: every complete [dd:hh:mm:ss] marker in the text
+    /// Automatic parsing: every complete [hh:mm:ss:cc] marker in the text
     /// field immediately becomes a floating annotation (idempotent). The
     /// field itself is never rewritten while typing.
     fn sync_annotations_from_text(&mut self) {
@@ -644,7 +644,7 @@ impl App {
             self.select_now(path, audition);
         }
     }
-    /// Bottom text field: "[dd:hh:mm:ss] note" entries become annotations.
+    /// Bottom text field: "[hh:mm:ss:cc] note" entries become annotations.
     #[cfg(test)]
     fn submit_annotation_text(&mut self) {
         match annotations::parse_text(&self.annotation_text) {

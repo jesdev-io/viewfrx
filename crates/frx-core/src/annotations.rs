@@ -1,7 +1,7 @@
 //! Timestamp annotations stored inside the audio file's own metadata, so the
 //! file stays a normal audio file that any player can open.
 //!
-//! Format: free text containing `[dd:hh:mm:ss]` markers, e.g.
+//! Format: free text containing `[hh:mm:ss:cc]` markers, e.g.
 //! `[00:00:12:00] thunder starts`. WAV files carry annotations in a RIFF
 //! `LIST`/`INFO` chunk with a custom `FRXA` sub-chunk (inserted before the
 //! `data` chunk, where players and Symphonia actually read metadata); MP3
@@ -23,22 +23,22 @@ pub struct Annotation {
     pub text: String,
 }
 
-/// `[dd:hh:mm:ss]` where dd = days, hh < 24, mm/ss < 60.
+/// `[hh:mm:ss:cc]` where cc = centiseconds (100*ms + 10*ms), mm/ss < 60.
 pub fn format_timestamp(seconds: f64) -> String {
     let total = if seconds.is_finite() {
         seconds.max(0.0)
     } else {
         0.0
     };
-    let whole = total as u64;
-    let days = whole / 86_400;
-    let hours = (whole / 3_600) % 24;
-    let minutes = (whole / 60) % 60;
-    let secs = whole % 60;
-    format!("[{days:02}:{hours:02}:{minutes:02}:{secs:02}]")
+    let centis = (total * 100.0).round() as u64;
+    let hours = centis / 360_000;
+    let minutes = (centis / 6_000) % 60;
+    let secs = (centis / 100) % 60;
+    let cc = centis % 100;
+    format!("[{hours:02}:{minutes:02}:{secs:02}:{cc:02}]")
 }
 
-/// Parse one `[dd:hh:mm:ss]` token; returns the position in seconds.
+/// Parse one `[hh:mm:ss:cc]` token (cc = centiseconds); returns seconds.
 pub fn parse_timestamp(token: &str) -> Option<f64> {
     let inner = token.strip_prefix('[')?.strip_suffix(']')?;
     let parts: Vec<&str> = inner.split(':').collect();
@@ -49,17 +49,17 @@ pub fn parse_timestamp(token: &str) -> Option<f64> {
     {
         return None;
     }
-    let days: u64 = parts[0].parse().ok()?;
-    let hours: u64 = parts[1].parse().ok()?;
-    let minutes: u64 = parts[2].parse().ok()?;
-    let secs: u64 = parts[3].parse().ok()?;
-    if hours > 23 || minutes > 59 || secs > 59 {
+    let hours: u64 = parts[0].parse().ok()?;
+    let minutes: u64 = parts[1].parse().ok()?;
+    let secs: u64 = parts[2].parse().ok()?;
+    let centis: u64 = parts[3].parse().ok()?;
+    if minutes > 59 || secs > 59 || centis > 99 {
         return None;
     }
-    Some((((days * 24 + hours) * 60 + minutes) * 60 + secs) as f64)
+    Some((hours * 360_000 + minutes * 6_000 + secs * 100 + centis) as f64 / 100.0)
 }
 
-/// Parse free text into annotations: every `[dd:hh:mm:ss]` marker starts an
+/// Parse free text into annotations: every `[hh:mm:ss:cc]` marker starts an
 /// annotation whose text runs until the next marker or the end of input.
 pub fn parse_text(input: &str) -> Result<Vec<Annotation>> {
     let mut found = Vec::new();
@@ -83,12 +83,12 @@ pub fn parse_text(input: &str) -> Result<Vec<Annotation>> {
         i += 1;
     }
     if found.is_empty() {
-        bail!("expected at least one [dd:hh:mm:ss] timestamp marker in the text");
+        bail!("expected at least one [hh:mm:ss:cc] timestamp marker in the text");
     }
     Ok(found)
 }
 
-/// Render annotations back into the `[dd:hh:mm:ss] text` free-text form.
+/// Render annotations back into the `[hh:mm:ss:cc] text` free-text form.
 pub fn format_annotations(annotations: &[Annotation]) -> String {
     let mut out = String::new();
     for annotation in annotations {
@@ -105,17 +105,17 @@ pub fn format_annotations(annotations: &[Annotation]) -> String {
 }
 
 /// Idempotent merge: identical (seconds, text) pairs are not duplicated;
-/// the result is sorted by time. Times are canonicalized to whole seconds
-/// because the `[dd:hh:mm:ss]` marker format has integer-second resolution —
-/// this is what makes text-field entry and right-click markers idempotent
-/// with each other.
+/// the result is sorted by time. Times are canonicalized to centiseconds
+/// because the `[hh:mm:ss:cc]` marker format has 10 ms resolution — this is
+/// what makes text-field entry and right-click markers idempotent with each
+/// other.
 pub fn merge(existing: &mut Vec<Annotation>, new: &[Annotation]) {
     for annotation in new {
         if !annotation.seconds.is_finite() || annotation.seconds < 0.0 {
             continue;
         }
         let canonical = Annotation {
-            seconds: annotation.seconds.round(),
+            seconds: (annotation.seconds * 100.0).round() / 100.0,
             text: annotation.text.clone(),
         };
         if existing.contains(&canonical) {
@@ -137,7 +137,7 @@ pub fn merge(existing: &mut Vec<Annotation>, new: &[Annotation]) {
 }
 
 /// Extract annotations from decoded metadata tags (any tag value may carry
-/// `[dd:hh:mm:ss]` markers; writers use dedicated keys).
+/// `[hh:mm:ss:cc]` markers; writers use dedicated keys).
 pub fn from_tags(tags: &[(String, String)]) -> Vec<Annotation> {
     let mut annotations = Vec::new();
     for (_, value) in tags {
@@ -461,38 +461,38 @@ mod tests {
     #[test]
     fn timestamp_parse_and_format_round_trip() {
         assert_eq!(parse_timestamp("[00:00:00:00]"), Some(0.0));
-        assert_eq!(parse_timestamp("[00:00:01:30]"), Some(90.0));
-        assert_eq!(
-            parse_timestamp("[01:02:03:04]"),
-            Some((((24 + 2) * 60 + 3) * 60 + 4) as f64)
-        );
-        assert_eq!(parse_timestamp("[00:24:00:00]"), None);
-        assert_eq!(parse_timestamp("[00:00:60:00]"), None);
-        assert_eq!(parse_timestamp("[00:00:00]"), None);
+        assert_eq!(parse_timestamp("[00:00:01:30]"), Some(1.3));
+        assert_eq!(parse_timestamp("[01:02:03:04]"), Some(3723.04));
+        assert_eq!(parse_timestamp("[00:00:60:00]"), None); // seconds > 59
+        assert_eq!(parse_timestamp("[00:00:00:100]"), None); // centis > 99
+        assert_eq!(parse_timestamp("[00:00:00]"), None); // needs hh:mm:ss:cc
         assert_eq!(parse_timestamp("hello"), None);
-        assert_eq!(format_timestamp(90.0), "[00:00:01:30]");
-        assert_eq!(format_timestamp(93784.0), "[01:02:03:04]");
+        assert_eq!(format_timestamp(1.3), "[00:00:01:30]");
+        assert_eq!(format_timestamp(3723.04), "[01:02:03:04]");
+        assert_eq!(format_timestamp(90.0), "[00:01:30:00]");
+        // Centisecond canonicalization keeps sub-second positions distinct.
+        assert_eq!(format_timestamp(2.456), "[00:00:02:46]");
     }
 
     #[test]
     fn parse_text_splits_multiple_markers_and_rejects_markerless_input() -> Result<()> {
-        let parsed = parse_text("[00:00:01:00] thunder\n[00:02:00:00] rain starts later")?;
+        let parsed = parse_text("[00:00:01:00] thunder\n[00:02:00:50] rain starts later")?;
         assert_eq!(
             parsed,
             vec![
                 Annotation {
-                    seconds: 60.0,
+                    seconds: 1.0,
                     text: "thunder".into()
                 },
                 Annotation {
-                    seconds: 7200.0,
+                    seconds: 120.5,
                     text: "rain starts later".into()
                 },
             ]
         );
         assert_eq!(
             format_annotations(&parsed),
-            "[00:00:01:00] thunder\n[00:02:00:00] rain starts later"
+            "[00:00:01:00] thunder\n[00:02:00:50] rain starts later"
         );
         assert!(parse_text("no marker here").is_err());
         Ok(())
@@ -623,7 +623,7 @@ mod tests {
         // Read back through metadata tags.
         assert_eq!(read(&path)?, added);
         // New annotation merges with existing ones; sub-second times
-        // canonicalize to whole seconds ([dd:hh:mm:ss] has integer-second
+        // canonicalize to whole seconds ([hh:mm:ss:cc] has integer-second
         // resolution), which keeps both entry methods idempotent.
         let more = annotate(
             &path,
@@ -640,7 +640,7 @@ mod tests {
         )?;
         assert_eq!(more.len(), 4);
         assert!(more.contains(&Annotation {
-            seconds: 2.0,
+            seconds: 2.4,
             text: "r".into()
         }));
         Ok(())

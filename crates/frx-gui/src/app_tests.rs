@@ -314,7 +314,7 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
         tags: vec![],
     });
     // Text-field entry: floating only, nothing written to disk yet.
-    app.annotation_text = "[00:00:00:02] hello".into();
+    app.annotation_text = "[00:00:02:00] hello".into();
     app.submit_annotation_text();
     assert!(app.annotations_dirty);
     assert_eq!(
@@ -324,7 +324,7 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
             text: "hello".into()
         }]
     );
-    assert_eq!(app.annotation_text, "[00:00:00:02] hello");
+    assert_eq!(app.annotation_text, "[00:00:02:00] hello");
     assert_eq!(
         frx_core::annotations::read(&path).unwrap(),
         Vec::new(),
@@ -360,11 +360,11 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
     }
     assert_eq!(app.annotations.len(), 2);
     assert!(app.annotations.contains(&Annotation {
-        seconds: 1.0,
+        seconds: 0.75,
         text: String::new()
     }));
     // Re-submitting the same line is idempotent.
-    app.annotation_text = "[00:00:00:02] hello".into();
+    app.annotation_text = "[00:00:02:00] hello".into();
     app.submit_annotation_text();
     assert_eq!(app.annotations.len(), 2);
     // Switching files with unsaved changes asks first instead of selecting.
@@ -379,7 +379,7 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
     assert!(app.pending_selection.is_none());
     // Select the original again and save explicitly (in place).
     app.select(path.clone(), false);
-    app.annotation_text = "[00:00:00:02] hello".into();
+    app.annotation_text = "[00:00:02:00] hello".into();
     app.submit_annotation_text();
     assert!(app.annotations_dirty);
     app.save_annotations_to(path.clone());
@@ -575,11 +575,11 @@ fn left_click_only_seeks_and_right_click_creates_preselected_marker() {
     assert_eq!(
         app.annotations,
         vec![Annotation {
-            seconds: 1.0,
+            seconds: 0.75,
             text: String::new()
         }]
     );
-    assert!(app.annotation_text.contains("[00:00:00:01]"));
+    assert!(app.annotation_text.contains("[00:00:00:75]"));
     assert!(app.focus_annotation_field);
     assert!(app.annotations_dirty);
     // Opening another annotation while the first has no content deletes the
@@ -589,10 +589,10 @@ fn left_click_only_seeks_and_right_click_creates_preselected_marker() {
     assert_eq!(
         app.annotations,
         vec![Annotation {
-            seconds: 0.0,
+            seconds: 0.25,
             text: String::new()
         }],
-        "the content-less marker at 1 s must be deleted when a new one opens"
+        "the content-less marker at 0.75 s must be deleted when a new one opens"
     );
     // Typing the note attaches it to the marker (empty marker replaced).
     app.focus_annotation_field = false;
@@ -601,7 +601,7 @@ fn left_click_only_seeks_and_right_click_creates_preselected_marker() {
     assert_eq!(
         app.annotations,
         vec![Annotation {
-            seconds: 0.0,
+            seconds: 0.25,
             text: "thunder".into()
         }]
     );

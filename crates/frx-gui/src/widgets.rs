@@ -4,7 +4,7 @@ use crate::{
     model::TimeWindow,
     theme,
 };
-use eframe::egui::{self, Response, Sense, Stroke, pos2, vec2};
+use eframe::egui::{self, Response, RichText, Sense, Stroke, pos2, vec2};
 use frx_audio::Status;
 use frx_core::{annotations::Annotation, waveform::Waveform};
 use std::ops::RangeInclusive;
@@ -289,6 +289,52 @@ pub fn annotation_lines(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
             Stroke::new(l::THIN_STROKE, theme::ANNOTATION),
         );
+        // Small tag-like symbol on top of the line.
+        let tip = pos2(x, rect.top() + l::ANNOTATION_TAG_H);
+        let left = pos2(x - l::ANNOTATION_TAG_W / 2.0, rect.top());
+        let right = pos2(x + l::ANNOTATION_TAG_W / 2.0, rect.top());
+        painter.add(egui::Shape::convex_polygon(
+            vec![left, right, tip],
+            theme::ANNOTATION,
+            Stroke::new(l::THIN_STROKE, theme::PANEL),
+        ));
+    }
+}
+
+/// Hover preview: when the pointer is near an annotation marker, show its
+/// content in a tooltip. Call from plot views that have a hovered response.
+pub fn annotation_hover_preview(
+    response: &egui::Response,
+    rect: egui::Rect,
+    annotations: &[Annotation],
+    window: TimeWindow,
+) {
+    if !response.hovered() || window.len() <= 0.0 {
+        return;
+    }
+    let Some(pointer) = response.ctx.input(|i| i.pointer.latest_pos()) else {
+        return;
+    };
+    if !rect.contains(pointer) {
+        return;
+    }
+    let nearest = annotations.iter().min_by_key(|a| {
+        let x = rect.left() + window.time_to_fraction(a.seconds) * rect.width();
+        ((x - pointer.x).abs() * 1000.0) as i64
+    });
+    if let Some(a) = nearest {
+        let x = rect.left() + window.time_to_fraction(a.seconds) * rect.width();
+        if (x - pointer.x).abs() <= l::ANNOTATION_HOVER_PX {
+            let timestamp = frx_core::annotations::format_timestamp(a.seconds);
+            let body = if a.text.is_empty() {
+                format!("{timestamp} (no text yet)")
+            } else {
+                format!("{timestamp} {}", a.text)
+            };
+            response.clone().on_hover_ui_at_pointer(|ui| {
+                ui.label(RichText::new(body).monospace());
+            });
+        }
     }
 }
 
@@ -383,6 +429,7 @@ pub fn waveform_channel_view(
         start_marker(&painter, rect, start, window);
     }
     playhead(&painter, rect, position, window);
+    annotation_hover_preview(&response, rect, overlays.annotations, window);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

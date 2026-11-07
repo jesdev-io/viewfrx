@@ -136,7 +136,7 @@ enum Action {
     /// altering the audio. Idempotent: identical annotations are not duplicated.
     Annotate {
         path: PathBuf,
-        /// Free text containing [dd:hh:mm:ss] markers, e.g. "[00:00:12:00] thunder".
+        /// Free text containing [hh:mm:ss:cc] markers, e.g. "[00:00:12:00] thunder".
         text: Option<String>,
         /// Place the annotation at this time (seconds) instead of parsing markers.
         #[arg(long)]
@@ -441,7 +441,7 @@ fn run() -> Result<()> {
                 }]
             } else {
                 annotations::parse_text(
-                    &text.context("provide TEXT with [dd:hh:mm:ss] markers, or use --seconds")?,
+                    &text.context("provide TEXT with [hh:mm:ss:cc] markers, or use --seconds")?,
                 )?
             };
             let stored = match &output {
@@ -614,7 +614,7 @@ fn session(engine: Engine) -> Result<()> {
                         }]
                     } else {
                         let text = value.get("text").and_then(|t| t.as_str()).context(
-                            "annotate needs text with [dd:hh:mm:ss] markers, or seconds",
+                            "annotate needs text with [hh:mm:ss:cc] markers, or seconds",
                         )?;
                         annotations::parse_text(text)?
                     };

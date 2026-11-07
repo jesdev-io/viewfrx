@@ -885,7 +885,7 @@ impl App {
             });
     }
 
-    /// Annotation column/row: the [dd:hh:mm:ss] free-text field.
+    /// Annotation column/row: the [hh:mm:ss:cc] free-text field.
     fn annotation_panel(&mut self, ui: &mut egui::Ui, width: f32, height: f32) {
         egui::Frame::new()
             .fill(theme::PANEL)
@@ -899,13 +899,13 @@ impl App {
                         .size(l::MICRO_FONT)
                         .color(theme::ANNOTATION),
                 );
-                // Multiline: each [dd:hh:mm:ss] timestamp gets its own text row,
+                // Multiline: each [hh:mm:ss:cc] timestamp gets its own text row,
                 // and newlines render as real line breaks (no replacement glyph).
                 let rows = ((height - 2.0 * l::CARD_PADDING as f32 - 16.0) / 18.0)
                     .max(1.0) as usize;
                 let response = ui.add(
                     egui::TextEdit::multiline(&mut self.annotation_text)
-                        .hint_text("[dd:hh:mm:ss] note per row — markers appear instantly, Ctrl+S saves")
+                        .hint_text("[hh:mm:ss:cc] note per row — markers appear instantly, Ctrl+S saves")
                         .desired_width(f32::INFINITY)
                         .desired_rows(rows),
                 );

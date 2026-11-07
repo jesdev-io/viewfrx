@@ -142,4 +142,9 @@ pub mod layout {
     /// Draggable height handle strip thickness in pixels.
     pub const HEIGHT_HANDLE: f32 = 8.0;
     pub const PLOT_HEIGHT_MIN: f32 = 60.0;
+    /// Annotation marker tag symbol (triangle on top of the line).
+    pub const ANNOTATION_TAG_W: f32 = 10.0;
+    pub const ANNOTATION_TAG_H: f32 = 7.0;
+    /// Hover distance (px) within which a marker shows its preview tooltip.
+    pub const ANNOTATION_HOVER_PX: f32 = 6.0;
 }
