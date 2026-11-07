@@ -661,3 +661,42 @@ fn right_click_maps_cursor_position_to_absolute_time() {
         );
     }
 }
+
+#[test]
+fn typing_annotation_text_never_accumulates_per_keystroke_markers() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    app.browser.selected = Some(dir.path().join("a.wav"));
+    app.info = Some(AudioInfo {
+        sample_rate: 8000,
+        channels: 2,
+        frames: Some(8000),
+        duration_seconds: Some(1.0),
+        bits_per_sample: Some(16),
+        tags: vec![],
+    });
+    // Simulate typing "test" onto a marker at 0.88 s, one keystroke at a time.
+    for text in [
+        "[00:00:00:88] t",
+        "[00:00:00:88] te",
+        "[00:00:00:88] tes",
+        "[00:00:00:88] test",
+    ] {
+        app.annotation_text = text.into();
+        app.sync_annotations_from_text();
+        assert_eq!(
+            app.annotations.len(),
+            1,
+            "no per-keystroke duplicates at {text:?}: {:?}",
+            app.annotations
+        );
+    }
+    assert_eq!(
+        app.annotations,
+        vec![Annotation {
+            seconds: 0.88,
+            text: "test".into()
+        }]
+    );
+}

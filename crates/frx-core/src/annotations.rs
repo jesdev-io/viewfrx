@@ -121,14 +121,13 @@ pub fn merge(existing: &mut Vec<Annotation>, new: &[Annotation]) {
         if existing.contains(&canonical) {
             continue;
         }
-        // Edit flow: a marker dropped by clicking (empty text) is replaced by
-        // the same timestamp once the user types the note text.
-        if !canonical.text.is_empty()
-            && let Some(pos) = existing
-                .iter()
-                .position(|a| a.seconds == canonical.seconds && a.text.is_empty())
-        {
-            existing[pos] = canonical;
+        // Same timestamp = same marker: typing note text replaces the
+        // marker's content (empty or previous), so editing never accumulates
+        // per-keystroke duplicates. An empty new text never clobbers content.
+        if let Some(pos) = existing.iter().position(|a| a.seconds == canonical.seconds) {
+            if !canonical.text.is_empty() {
+                existing[pos] = canonical;
+            }
             continue;
         }
         existing.push(canonical);
@@ -499,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_replaces_empty_marker_with_text_at_same_time() {
+    fn merge_replaces_marker_text_at_same_time_without_duplicates() {
         let mut existing = vec![Annotation {
             seconds: 12.0,
             text: String::new(),
@@ -519,12 +518,33 @@ mod tests {
                 text: "thunder".into()
             }]
         );
+        // Each further keystroke replaces the text — no per-byte duplicates.
+        for text in ["thunde", "thunder!", "thunder!!"] {
+            merge(
+                &mut existing,
+                &[Annotation {
+                    seconds: 12.0,
+                    text: text.into(),
+                }],
+            );
+            assert_eq!(existing.len(), 1, "text={text}");
+        }
+        assert_eq!(existing[0].text, "thunder!!");
+        // An empty marker at the same time never clobbers the text.
+        merge(
+            &mut existing,
+            &[Annotation {
+                seconds: 12.0,
+                text: String::new(),
+            }],
+        );
+        assert_eq!(existing[0].text, "thunder!!");
         // Re-adding the same is idempotent; a different time adds a new marker.
         merge(
             &mut existing,
             &[Annotation {
                 seconds: 12.0,
-                text: "thunder".into(),
+                text: "thunder!!".into(),
             }],
         );
         merge(
@@ -536,7 +556,6 @@ mod tests {
         );
         assert_eq!(existing.len(), 2);
     }
-
     #[test]
     fn merge_is_idempotent_and_sorted() {
         let mut existing = vec![Annotation {
