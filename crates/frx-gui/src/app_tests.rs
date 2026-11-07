@@ -512,10 +512,10 @@ fn scroll_wheel_over_waveform_zooms_around_cursor() {
 }
 
 #[test]
-fn waveform_click_drops_marker_and_preselects_annotation_field() {
+fn left_click_only_seeks_and_right_click_creates_preselected_marker() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = egui::Context::default();
-    let (mut app, _rx) = test_app(&ctx, dir.path());
+    let (mut app, rx) = test_app(&ctx, dir.path());
     app.browser.selected = Some(dir.path().join("a.wav"));
     app.info = Some(AudioInfo {
         sample_rate: 8000,
@@ -531,49 +531,80 @@ fn waveform_click_drops_marker_and_preselects_annotation_field() {
             rect = waveform_view(ui, None, 0.0, 1.0, 120.0).rect;
         });
     });
-    // Click at 3/4 of the 1 s plot.
-    let position = pos2(rect.left() + rect.width() * 0.75, rect.center().y);
-    for pressed in [true, false] {
-        let input = egui::RawInput {
-            events: vec![
-                egui::Event::PointerMoved(position),
-                egui::Event::PointerButton {
-                    pos: position,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: Default::default(),
-                },
-            ],
-            ..Default::default()
-        };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                let response = waveform_view(ui, None, 0.0, 1.0, 120.0);
-                app.handle_seek(response, ui);
+    let click = |button: egui::PointerButton,
+                 app: &mut App,
+                 ctx: &egui::Context,
+                 rect: egui::Rect,
+                 frac: f32| {
+        let position = pos2(rect.left() + rect.width() * frac, rect.center().y);
+        for pressed in [true, false] {
+            let input = egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let response = waveform_view(ui, None, 0.0, 1.0, 120.0);
+                    app.handle_seek(response, ui);
+                });
             });
-        });
-    }
-    // A marker line appeared at the clicked time (rounded to whole seconds)...
-    assert!(app.annotations.contains(&Annotation {
-        seconds: 1.0,
-        text: String::new()
-    }));
-    // ...the field is preselected with that timestamp, ready to edit...
+        }
+    };
+    // Left click: seeks only, NO annotation.
+    click(egui::PointerButton::Primary, &mut app, &ctx, rect, 0.75);
+    assert!(app.annotations.is_empty(), "left click must not annotate");
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        AudioRequest::Transport(Command::Play { .. })
+    ));
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        AudioRequest::Transport(Command::Seek { seconds }) if (seconds - 0.75).abs() < 1e-6
+    ));
+    assert!(!app.focus_annotation_field);
+    // Right click at 3/4: marker line + field preselected with the timestamp.
+    click(egui::PointerButton::Secondary, &mut app, &ctx, rect, 0.75);
+    assert_eq!(
+        app.annotations,
+        vec![Annotation {
+            seconds: 1.0,
+            text: String::new()
+        }]
+    );
     assert!(app.annotation_text.contains("[00:00:00:01]"));
     assert!(app.focus_annotation_field);
     assert!(app.annotations_dirty);
-    // ...and typing the note attaches it to that marker (no duplicate line).
+    // Opening another annotation while the first has no content deletes the
+    // redundant empty one: right-click at 1/4 (0.25 s -> 0 s) -> only the new
+    // empty marker at 0 s remains.
+    click(egui::PointerButton::Secondary, &mut app, &ctx, rect, 0.25);
+    assert_eq!(
+        app.annotations,
+        vec![Annotation {
+            seconds: 0.0,
+            text: String::new()
+        }],
+        "the content-less marker at 1 s must be deleted when a new one opens"
+    );
+    // Typing the note attaches it to the marker (empty marker replaced).
     app.focus_annotation_field = false;
     app.annotation_text = format!("{} thunder", app.annotation_text.trim_end());
     app.sync_annotations_from_text();
     assert_eq!(
         app.annotations,
         vec![Annotation {
-            seconds: 1.0,
+            seconds: 0.0,
             text: "thunder".into()
         }]
     );
-    assert!(!app.annotation_text.contains("\n\n"));
 }
 
 #[test]

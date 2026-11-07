@@ -575,21 +575,18 @@ impl App {
             return;
         }
         let before = self.annotations.clone();
+        if sync_field && !new.is_empty() {
+            // A content-less marker is a placeholder: opening another
+            // annotation (right-click) makes it redundant, so delete it.
+            self.annotations.retain(|a| !a.text.is_empty());
+        }
         annotations::merge(&mut self.annotations, &new);
         if self.annotations != before {
             self.annotations_dirty = self.annotations != self.saved_annotations;
             if sync_field {
-                // Right-click markers render into the text field too (idempotent).
-                let mut text = self.annotation_text.clone();
-                for line in annotations::format_annotations(&new).lines() {
-                    if !text.lines().any(|l| l == line) {
-                        if !text.is_empty() {
-                            text.push('\n');
-                        }
-                        text.push_str(line);
-                    }
-                }
-                self.annotation_text = text;
+                // Right-click rewrites the field from the canonical marker list
+                // (redundant empty lines disappear); typing never rewrites it.
+                self.annotation_text = annotations::format_annotations(&self.annotations);
             }
             crate::logln!(
                 "annotation added (floating, {} unsaved change(s))",
@@ -804,7 +801,9 @@ impl App {
                 self.zoom_at(f, scale);
             }
         }
-        // Right-click at a time position creates a timestamp annotation there.
+        // Right-click at a time position is the ONLY way to create a timestamp
+        // annotation: it drops the marker line there and preselects the
+        // annotation field with that timestamp, ready to type the note.
         if response.secondary_clicked()
             && let Some(f) = fraction(ui)
             && let Some(seconds) = self.window().fraction_to_time(f)
@@ -816,6 +815,7 @@ impl App {
                 }],
                 true,
             );
+            self.focus_annotation_field = true;
             return;
         }
         if (response.clicked()
@@ -825,21 +825,8 @@ impl App {
             && let Some(f) = fraction(ui)
             && let Some(seconds) = self.window().fraction_to_time(f)
         {
+            // Left click only seeks; annotations are right-click only.
             self.seek(seconds);
-            if response.clicked() {
-                // A plain click on a plot section drops a marker line there and
-                // preselects the annotation field with that timestamp, ready to
-                // type the note (the line and the field render each other).
-                self.add_annotations(
-                    vec![Annotation {
-                        seconds,
-                        text: String::new(),
-                    }],
-                    false,
-                );
-                self.annotation_text = annotations::format_annotations(&self.annotations);
-                self.focus_annotation_field = true;
-            }
         }
     }
     fn keyboard(&mut self, ctx: &egui::Context) {
