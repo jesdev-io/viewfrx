@@ -31,8 +31,9 @@ The CLI binary is `target/release/viewfrx` (`viewfrx.exe` on Windows). Plain `ca
 
 Download the archive for your operating system from the [Releases page](../../releases):
 
-- Linux/macOS: `viewfrx-<platform>.tar.gz`
-- Windows: `viewfrx-Windows.zip`
+- Linux: `viewfrx-ubuntu-latest.tar.gz`
+- macOS: `viewfrx-macos-latest.tar.gz`
+- Windows: `viewfrx-windows-latest.zip`
 
 Archives contain the `viewfrx` CLI, `viewfrx-gui` desktop app, this README, and the license. Extract the archive and run the binary directly (on Linux, the GUI requires system OpenGL/X11 or Wayland libraries and desktop portal support for file dialogs). Releases also include a Linux `.deb` (Debian/Ubuntu) and AppImage, a Windows `.msi`, and a macOS `.dmg`. The `.deb` declares its ALSA runtime dependency; graphics, desktop portal, and audio-device libraries still come from the host system. The MSI and DMG are currently unsigned, so Windows/macOS may show security warnings; signing/notarization can be added when credentials are available. Verify downloads with `SHA256SUMS` when available. Releases are built by GitHub Actions for Linux, Windows, and macOS; source archives are also attached automatically.
 

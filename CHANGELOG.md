@@ -2,6 +2,10 @@
 
 All notable changes to viewfrx. Versions follow SemVer; releases are tagged `v*` and published by CI with per-platform binaries (Linux/Windows/macOS) plus source.
 
+## [0.1.4] - 2026-11-07
+
+- Ensure Windows portable releases are packaged as `.zip` archives with matching README instructions.
+
 ## [0.1.3] - 2026-11-07
 
 - Keep the hovered timestamp fixed at the same screen position during scroll-wheel zoom; cap zoom expansion at file edges. Button zoom behavior is unchanged.
