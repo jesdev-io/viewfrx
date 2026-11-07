@@ -118,11 +118,19 @@ pub mod layout {
     pub const DEBUG_WINDOW_SIZE: [f32; 2] = [560.0, 260.0];
     #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_HEIGHT: f32 = 130.0;
-    /// Annotation row height bounds; the split bar between the annotation
-    /// and spectrum rows redistributes height within these bounds.
-    pub const ANNOTATION_ROW_DEFAULT: f32 = 34.0;
-    pub const ANNOTATION_ROW_MIN: f32 = 28.0;
-    pub const ANNOTATION_ROW_MAX: f32 = 160.0;
+    /// Annotation column height when no spectrum column is shown.
+    pub const ANNOTATION_ROW_DEFAULT: f32 = 64.0;
+    /// Annotation column width bounds; the vertical split bar between the
+    /// annotation and spectrum columns redistributes width within these.
+    #[cfg(feature = "spectrogram")]
+    pub const ANNOTATION_WIDTH_DEFAULT: f32 = 420.0;
+    #[cfg(feature = "spectrogram")]
+    pub const ANNOTATION_WIDTH_MIN: f32 = 220.0;
+    #[cfg(feature = "spectrogram")]
+    pub const SPECTRUM_MIN_WIDTH: f32 = 260.0;
+    /// Vertical split bar thickness in pixels.
+    #[cfg(feature = "spectrogram")]
+    pub const WIDTH_HANDLE: f32 = 8.0;
     /// Draggable height handle strip thickness in pixels.
     pub const HEIGHT_HANDLE: f32 = 8.0;
     pub const PLOT_HEIGHT_MIN: f32 = 60.0;

@@ -62,8 +62,10 @@ pub struct App {
     spectrum_on: bool,
     #[cfg(feature = "spectrogram")]
     spectrum_height: f32,
-    /// Annotation row height (bottom rows are resized via the split bar).
-    annotation_height: f32,
+    /// Annotation column width; the vertical split bar between the
+    /// annotation and spectrum columns redistributes it.
+    #[cfg(feature = "spectrogram")]
+    annotation_width: f32,
     #[cfg(feature = "spectrogram")]
     spectrum: Option<(f64, frx_core::spectrum::Spectrum)>,
     #[cfg(feature = "spectrogram")]
@@ -145,7 +147,8 @@ impl App {
             spectrum_on: c::SPECTRUM_DEFAULT,
             #[cfg(feature = "spectrogram")]
             spectrum_height: 0.0,
-            annotation_height: 0.0,
+            #[cfg(feature = "spectrogram")]
+            annotation_width: 0.0,
             #[cfg(feature = "spectrogram")]
             spectrum: None,
             #[cfg(feature = "spectrogram")]

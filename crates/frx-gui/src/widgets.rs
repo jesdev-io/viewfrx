@@ -9,32 +9,42 @@ use frx_audio::Status;
 use frx_core::{annotations::Annotation, waveform::Waveform};
 use std::ops::RangeInclusive;
 
-/// Horizontal resize bar between two stacked rows: dragging it vertically
-/// redistributes height between the upper (`top`) and lower (`bottom`) row,
-/// keeping their sum constant. Dragging down grows the upper row.
+/// Width after a horizontal drag: egui drag deltas grow to the right on
+/// screen, so dragging the split bar right grows the left column.
 #[cfg(feature = "spectrogram")]
-pub fn split_handle(
+pub fn drag_width(value: f32, delta_x: f32, min: f32, max: f32) -> f32 {
+    (value + delta_x).clamp(min, max)
+}
+
+/// Vertical resize bar between two side-by-side columns: dragging it
+/// horizontally redistributes width between the left and right column,
+/// keeping their sum constant. Dragging right grows the left column.
+#[cfg(feature = "spectrogram")]
+pub fn vsplit_handle(
     ui: &mut egui::Ui,
-    top: &mut f32,
-    bottom: &mut f32,
-    min_top: f32,
-    min_bottom: f32,
+    left: &mut f32,
+    right: &mut f32,
+    min_left: f32,
+    min_right: f32,
+    height: f32,
 ) -> Response {
-    let total = *top + *bottom;
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), l::HEIGHT_HANDLE), Sense::drag());
+    let total = *left + *right;
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(l::WIDTH_HANDLE, height.max(l::HEIGHT_HANDLE)),
+        Sense::drag(),
+    );
     let response = response
-        .on_hover_cursor(egui::CursorIcon::ResizeVertical)
-        .on_hover_text("Drag to redistribute height between the rows above and below");
+        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+        .on_hover_text("Drag to redistribute width between the annotations and spectrum columns");
     if response.dragged() {
-        *top = drag_height(*top, response.drag_delta().y, min_top, total - min_bottom);
-        *bottom = (total - *top).max(min_bottom);
+        *left = drag_width(*left, response.drag_delta().x, min_left, total - min_right);
+        *right = (total - *left).max(min_right);
     }
     let painter = ui.painter_at(rect);
     if response.hovered() || response.dragged() {
         painter.rect_filled(rect, 0, theme::RAISED);
     }
-    let grip = egui::Rect::from_center_size(rect.center(), vec2(46.0, 3.0));
+    let grip = egui::Rect::from_center_size(rect.center(), vec2(3.0, 46.0));
     painter.rect_filled(
         grip,
         2,
@@ -573,32 +583,18 @@ mod tests {
 
     #[cfg(feature = "spectrogram")]
     #[test]
-    fn split_handle_drag_redistributes_row_heights() {
-        let ctx = egui::Context::default();
-        let mut top = 40.0f32;
-        let mut bottom = 130.0f32;
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                // Simulate a downward drag of +30 px.
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(200.0, l::HEIGHT_HANDLE), Sense::drag());
-                let _ = response;
-                let _ = rect;
-                // Drive the mapping directly (drag events are covered by the
-                // handle integration in the app tests).
-                let total = top + bottom;
-                top = drag_height(top, 30.0, 28.0, total - 60.0);
-                bottom = (total - top).max(60.0);
-            });
-        });
-        assert_eq!(top, 70.0);
-        assert_eq!(bottom, 100.0);
-        // Clamps keep both rows above their minimum.
-        let total = top + bottom;
-        top = drag_height(top, 1000.0, 28.0, total - 60.0);
-        bottom = (total - top).max(60.0);
-        assert_eq!(bottom, 60.0);
-        assert_eq!(top, total - 60.0);
+    fn vsplit_drag_right_grows_left_column() {
+        // Dragging the vertical bar right (positive x delta) widens the left
+        // (annotations) column and shrinks the right (spectrum) column.
+        assert_eq!(drag_width(300.0, 50.0, 220.0, 600.0), 350.0);
+        assert_eq!(drag_width(300.0, -500.0, 220.0, 600.0), 220.0);
+        // Redistribution keeps the sum constant and respects both minimums.
+        let total = 300.0f32 + 400.0f32;
+        let mut left = 300.0f32;
+        left = drag_width(left, 1000.0, 220.0, total - 260.0);
+        let right = (total - left).max(260.0);
+        assert_eq!(right, 260.0);
+        assert_eq!(left + right, total);
     }
 
     #[test]
