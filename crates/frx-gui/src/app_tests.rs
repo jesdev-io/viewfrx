@@ -607,6 +607,28 @@ fn left_click_only_seeks_and_right_click_creates_preselected_marker() {
             text: "thunder".into()
         }]
     );
+    // Now add an EARLIER annotation (0.1 s): rows must stay ordered by
+    // ascending time and the cursor must land on the NEW row (0.1 s), not the
+    // first or last position.
+    click(egui::PointerButton::Secondary, &mut app, &ctx, rect, 0.1);
+    let expected_field = "[00:00:00:10]\n[00:00:00:25] thunder";
+    assert_eq!(app.annotation_text, expected_field, "rows sorted ascending");
+    // "[00:00:00:10]" is 13 chars -> cursor at end of the new (first) row.
+    assert_eq!(app.annotation_cursor_char, Some(13));
+    assert!(app.focus_annotation_field);
+    assert_eq!(
+        app.annotations,
+        vec![
+            Annotation {
+                seconds: 0.1,
+                text: String::new()
+            },
+            Annotation {
+                seconds: 0.25,
+                text: "thunder".into()
+            },
+        ]
+    );
 }
 
 #[test]

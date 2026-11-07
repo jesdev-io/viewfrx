@@ -57,8 +57,10 @@ pub struct App {
     zoom: Option<TimeWindow>,
     /// Where playback was last started (grey marker line in the plots).
     last_play_start: Option<f64>,
-    /// Focus the annotation text field next frame (after a waveform click).
+    /// Focus the annotation text field next frame (after a right-click).
     focus_annotation_field: bool,
+    /// Char position for the cursor: end of the newly created marker's row.
+    annotation_cursor_char: Option<usize>,
     /// User-draggable plot heights (session-local, never persisted).
     wave_height: f32,
     spec_height: f32,
@@ -147,6 +149,7 @@ impl App {
             zoom: None,
             last_play_start: None,
             focus_annotation_field: false,
+            annotation_cursor_char: None,
             wave_height: 0.0,
             spec_height: 0.0,
             #[cfg(feature = "spectrogram")]
@@ -588,20 +591,24 @@ impl App {
         if self.annotations != before {
             self.annotations_dirty = self.annotations != self.saved_annotations;
             if sync_field && !new.is_empty() {
-                // Right-click rewrites the field from the canonical marker
-                // list (so deleted/redundant lines cannot resurrect), with
-                // the new marker's line moved to the END; the field is
-                // focused with cursor_at_end, i.e. right after that line,
-                // ready to type the note — even when the new marker sorts
-                // earlier in time. Typing never rewrites the field.
+                // Right-click rewrites the field sorted by ascending time
+                // (so deleted/redundant lines cannot resurrect) and records
+                // the cursor position at the END of the new marker's row, so
+                // the cursor lands on the newly created annotation even when
+                // it sorts before existing ones. Typing never rewrites the
+                // field.
+                let text = annotations::format_annotations(&self.annotations);
                 let new_line = annotations::format_timestamp(new[0].seconds);
-                let mut lines: Vec<String> = annotations::format_annotations(&self.annotations)
-                    .lines()
-                    .map(|l| l.to_string())
-                    .collect();
-                lines.retain(|l| l != &new_line);
-                lines.push(new_line);
-                self.annotation_text = lines.join("\n");
+                let mut pos = 0usize;
+                for line in text.lines() {
+                    if line == new_line {
+                        break;
+                    }
+                    pos += line.chars().count() + 1;
+                }
+                pos += new_line.chars().count();
+                self.annotation_text = text;
+                self.annotation_cursor_char = Some(pos);
             }
             crate::logln!(
                 "annotation added (floating, {} unsaved change(s))",

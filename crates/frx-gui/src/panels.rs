@@ -904,14 +904,12 @@ impl App {
                 let rows = ((height - 2.0 * l::CARD_PADDING as f32 - 16.0) / 18.0)
                     .max(1.0) as usize;
                 let focus = self.focus_annotation_field;
+                let cursor_char = self.annotation_cursor_char;
                 let response = ui.add(
                     egui::TextEdit::multiline(&mut self.annotation_text)
                         .hint_text("[hh:mm:ss:cc] note per row — markers appear instantly, Ctrl+S saves")
                         .desired_width(f32::INFINITY)
-                        .desired_rows(rows)
-                        // After a right-click the cursor goes to the end, right
-                        // after the newly appended timestamp line.
-                        .cursor_at_end(focus),
+                        .desired_rows(rows),
                 );
                 // Automatic: every complete marker in the text becomes a
                 // floating annotation immediately (idempotent), without
@@ -921,7 +919,16 @@ impl App {
                 }
                 if focus {
                     ui.memory_mut(|m| m.request_focus(response.id));
+                    // Place the cursor at the end of the newly created
+                    // marker's row (rows are sorted ascending by time).
+                    if let Some(pos) = cursor_char {
+                        let mut state = egui::text_edit::TextEditState::default();
+                        state.cursor =
+                            egui::text::CCursorRange::one(egui::text::CCursor::new(pos)).into();
+                        ui.memory_mut(|m| m.data.insert_temp(response.id, state));
+                    }
                     self.focus_annotation_field = false;
+                    self.annotation_cursor_char = None;
                 }
                 response.on_hover_text(format!(
                     "{} marker(s) on this file ({}). Right-click a plot to mark the playhead position.",
