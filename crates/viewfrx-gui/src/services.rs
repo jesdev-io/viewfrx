@@ -45,6 +45,11 @@ pub struct AudioService {
     shutdown: Arc<AtomicBool>,
 }
 impl AudioService {
+    #[cfg(all(test, feature = "spectrogram"))]
+    pub fn set_snapshot(&self, snapshot: AudioSnapshot) {
+        *self.snapshot.lock().unwrap() = snapshot;
+    }
+
     #[cfg(test)]
     pub fn mock() -> (Self, Receiver<AudioRequest>) {
         let (tx, rx) = mpsc::sync_channel(COMMAND_QUEUE);

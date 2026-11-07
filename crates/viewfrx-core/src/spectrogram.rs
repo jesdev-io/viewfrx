@@ -50,11 +50,16 @@ impl Spectrogram {
     pub fn duration_seconds(&self) -> f64 {
         self.frames as f64 / self.sample_rate.max(1) as f64
     }
+    /// Seconds between overview columns. After the 512-column cap the
+    /// overview compacts (windows_per_column doubles), so columns get wider.
+    pub fn column_seconds(&self) -> f64 {
+        self.hop_size as f64 * self.windows_per_column as f64 / self.sample_rate.max(1) as f64
+    }
     /// Sub-window view: columns whose centers fall in [from, to] seconds.
     /// Column k is centered at k * hop_size / sample_rate in the source.
     pub fn windowed(&self, from: f64, to: f64) -> Result<Spectrogram> {
         let (from, to) = crate::waveform::validate_window(from, to, self.duration_seconds())?;
-        let hop_seconds = self.hop_size as f64 / self.sample_rate.max(1) as f64;
+        let hop_seconds = self.column_seconds();
         let start = if self.columns == 0 {
             0
         } else {

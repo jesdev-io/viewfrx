@@ -56,7 +56,7 @@ pub fn render(data: Spectrogram, settings: RenderSettings) -> Option<RenderedSpe
         image: egui::ColorImage::new([data.columns, data.frequency_bins], pixels),
         right: None,
         nyquist_hz: data.sample_rate as f32 / 2.0,
-        column_seconds: data.hop_size as f64 / data.sample_rate.max(1) as f64,
+        column_seconds: data.column_seconds(),
     })
 }
 

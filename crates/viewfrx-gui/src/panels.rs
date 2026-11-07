@@ -5,7 +5,7 @@ use crate::{
     services::AudioRequest,
     theme, widgets,
 };
-use eframe::egui::{self, Color32, RichText, vec2};
+use eframe::egui::{self, RichText, vec2};
 use viewfrx_audio::{
     Command,
     config::{MAX_RATE, MIN_RATE},
@@ -245,7 +245,8 @@ impl App {
                     ui.add_space(l::EMPTY_GAP);
                     ui.label("Drop audio files or folders here.");
                     ui.label(
-                        RichText::new("Imported files remain as-is during browsing and listening.").color(theme::MUTED),
+                        RichText::new("Imported files remain as-is during browsing and listening.")
+                            .color(theme::MUTED),
                     );
                 } else if self.browser.visible.is_empty() && !self.scanning {
                     ui.label("No matching files.");
@@ -397,15 +398,16 @@ impl App {
             self.send(Command::Rate { value: self.rate });
         }
         ui.small(RichText::new("Rate changes pitch.").color(theme::MUTED));
-        if widgets::reset_toggle(ui, &mut self.highpass, false, "20 Hz Highpass").changed()
-        {
+        if widgets::reset_toggle(ui, &mut self.highpass, false, "20 Hz Highpass").changed() {
             self.send(Command::Highpass {
                 enabled: self.highpass,
             });
         }
         ui.small(
-            RichText::new("Fixed highpass attenuates frequencies below 20 Hz; DC offset is always removed.")
-                .color(theme::MUTED),
+            RichText::new(
+                "Fixed highpass attenuates frequencies below 20 Hz; DC offset is always removed.",
+            )
+            .color(theme::MUTED),
         );
         ui.separator();
         ui.label("STEREO LEVEL · dBFS");
@@ -442,10 +444,7 @@ impl App {
                     if self.spectrum_on { "on" } else { "off" }
                 );
             }
-            ui.small(
-                RichText::new("Magnitude spectrum at the playhead.")
-                    .color(theme::MUTED),
-            );
+            ui.small(RichText::new("Magnitude spectrum at the playhead.").color(theme::MUTED));
             if self.spectral.controls(ui)
                 && let Some(path) = self.browser.selected.clone()
             {
@@ -636,8 +635,9 @@ impl App {
                             self.spec_height = default_spec.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
                         }
                         if self.wave_height <= 0.0 {
-                            self.wave_height =
-                                (total_height - default_spec).clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
+                            // Waveforms get less than half the plot area on startup.
+                            self.wave_height = (total_height * l::WAVE_HEIGHT_FRACTION)
+                                .clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
                         }
                         let wave_height = self.wave_height.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
                         #[cfg(feature = "spectrogram")]
@@ -772,56 +772,44 @@ impl App {
                             );
                         });
                         ui.add_space(l::SPACE_MEDIUM);
-                        let playing = self.snapshot.status.as_ref().is_some_and(|s| {
-                            s.state == "playing" && s.path == self.browser.selected
-                        });
                         ui.horizontal(|ui| {
-                            // Symbol buttons: ⏮ previous, ▶ play, ❚❚ pause, ■ stop, ⏭ next.
-                            if ui
-                                .button(RichText::new("⏮").size(l::BODY_FONT))
-                                .on_hover_text("Previous visible file")
-                                .clicked()
-                            {
+                            // Painted symbol buttons, all the same size so they
+                            // align on one height: ⏮ ▶/❚❚ ■ ⏭.
+                            let prev = widgets::transport_button(ui, widgets::TransportSymbol::Prev, false)
+                                .on_hover_text("Previous visible file");
+                            if prev.clicked() {
                                 self.navigate(-1);
                             }
-                            let symbol = if self.pending_play {
-                                "✕"
+                            let playing = self.snapshot.status.as_ref().is_some_and(|s| {
+                                s.state == "playing" && s.path == self.browser.selected
+                            });
+                            let sym = if self.pending_play {
+                                widgets::TransportSymbol::Cancel
                             } else if playing {
-                                "❚❚"
+                                widgets::TransportSymbol::Pause
                             } else {
-                                "▶"
+                                widgets::TransportSymbol::Play
                             };
-                            if ui
-                                .add_sized(
-                                    l::PLAY_SIZE,
-                                    egui::Button::new(
-                                        RichText::new(symbol).color(Color32::BLACK).strong(),
-                                    )
-                                    .fill(theme::AMBER),
-                                )
-                                .on_hover_text(if self.pending_play {
+                            let play = widgets::transport_button(ui, sym, true).on_hover_text(
+                                if self.pending_play {
                                     "Cancel pending audition"
                                 } else if playing {
                                     "Pause (two vertical bars)"
                                 } else {
                                     "Play (triangle)"
-                                })
-                                .clicked()
-                            {
+                                },
+                            );
+                            if play.clicked() {
                                 self.toggle_play();
                             }
-                            if ui
-                                .button(RichText::new("■").size(l::BODY_FONT))
-                                .on_hover_text("Stop")
-                                .clicked()
-                            {
+                            let stop = widgets::transport_button(ui, widgets::TransportSymbol::Stop, false)
+                                .on_hover_text("Stop");
+                            if stop.clicked() {
                                 self.stop();
                             }
-                            if ui
-                                .button(RichText::new("⏭").size(l::BODY_FONT))
-                                .on_hover_text("Next visible file")
-                                .clicked()
-                            {
+                            let next = widgets::transport_button(ui, widgets::TransportSymbol::Next, false)
+                                .on_hover_text("Next visible file");
+                            if next.clicked() {
                                 self.navigate(1);
                             }
                         });

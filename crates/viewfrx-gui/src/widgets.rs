@@ -4,7 +4,7 @@ use crate::{
     model::TimeWindow,
     theme,
 };
-use eframe::egui::{self, Response, RichText, Sense, Stroke, pos2, vec2};
+use eframe::egui::{self, Color32, Response, RichText, Sense, Stroke, pos2, vec2};
 use std::ops::RangeInclusive;
 use viewfrx_audio::Status;
 use viewfrx_core::{annotations::Annotation, waveform::Waveform};
@@ -454,9 +454,9 @@ pub fn playhead(painter: &egui::Painter, rect: egui::Rect, position: f64, window
     }
 }
 
-/// Live magnitude spectrum panel (bottom right of the center area). Log-frequency
-/// axis with a 1/3-octave center-frequency grid and a height-dependent dB step
-/// grid; when the fixed highpass is enabled its response curve is plotted too.
+/// Live magnitude spectrum panel. The plot fills the panel from the first
+/// frequency bin (no empty gutters); the 1/3-octave xtick labels are thinned
+/// dynamically so they never overlap (wider panel -> more labels).
 #[cfg(feature = "spectrogram")]
 pub fn spectrum_view(
     ui: &mut egui::Ui,
@@ -473,15 +473,18 @@ pub fn spectrum_view(
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, l::PLOT_RADIUS, theme::PANEL);
     let pad = l::SPACE_SMALL;
+    // Plot area spans the full width (dB labels are overlaid at the left edge).
     let inner = egui::Rect::from_min_size(
-        rect.left_top() + vec2(pad + 14.0, pad),
+        rect.left_top() + vec2(pad, pad),
         vec2(
-            (rect.width() - 2.0 * pad - 14.0).max(10.0),
-            (rect.height() - 2.0 * pad).max(10.0),
+            (rect.width() - 2.0 * pad).max(10.0),
+            (rect.height() - 2.0 * pad - 12.0).max(10.0),
         ),
     );
     let nyquist = (sample_rate.max(1) as f32 / 2.0).max(c::SPECTRUM_MIN_HZ * 2.0);
-    let f_min = c::SPECTRUM_MIN_HZ.min(nyquist / 2.0);
+    // Start the axis at the first frequency bin that has data (no empty space).
+    let first_bin_hz = spectrum.map_or(c::SPECTRUM_MIN_HZ, |s| s.hz_per_bin.max(1.0));
+    let f_min = first_bin_hz.min(nyquist / 2.0);
     let x_of = |hz: f32| -> f32 {
         let f = hz.clamp(f_min, nyquist);
         inner.left()
@@ -502,7 +505,7 @@ pub fn spectrum_view(
             Stroke::new(l::THIN_STROKE, theme::RAISED),
         );
         painter.text(
-            pos2(rect.left() + 2.0, y),
+            pos2(inner.left() + 2.0, y),
             egui::Align2::LEFT_CENTER,
             format!("{db:.0}"),
             egui::FontId::monospace(l::MICRO_FONT),
@@ -510,20 +513,24 @@ pub fn spectrum_view(
         );
         db += step;
     }
-    // Vertical 1/3-octave center-frequency grid.
+    // Vertical 1/3-octave grid: all lines, but labels only where they fit.
+    let mut last_label_x = f32::NEG_INFINITY;
     for hz in viewfrx_core::spectrum::third_octave_centers(nyquist) {
         let x = x_of(hz);
         painter.line_segment(
             [pos2(x, inner.top()), pos2(x, inner.bottom())],
             Stroke::new(l::THIN_STROKE, theme::RAISED),
         );
-        painter.text(
-            pos2(x, rect.bottom() - 1.0),
-            egui::Align2::CENTER_BOTTOM,
-            format_hz(hz),
-            egui::FontId::monospace(l::MICRO_FONT),
-            theme::MUTED,
-        );
+        if x - last_label_x >= l::SPECTRUM_MIN_XTICK_LABEL_PX {
+            painter.text(
+                pos2(x, rect.bottom() - 1.0),
+                egui::Align2::CENTER_BOTTOM,
+                format_hz(hz),
+                egui::FontId::monospace(l::MICRO_FONT),
+                theme::MUTED,
+            );
+            last_label_x = x;
+        }
     }
     if let Some(spectrum) = spectrum {
         let bins = spectrum.dbfs.len();
@@ -573,7 +580,7 @@ pub fn spectrum_view(
     );
     if let Some((cutoff_hz, _)) = highpass {
         painter.text(
-            rect.left_top() + vec2(pad + 14.0, pad),
+            rect.left_top() + vec2(pad, pad),
             egui::Align2::LEFT_TOP,
             format!("HPF {cutoff_hz:.0} Hz"),
             egui::FontId::monospace(l::MICRO_FONT),
@@ -585,6 +592,104 @@ pub fn spectrum_view(
     } else {
         "Magnitude spectrum at the playhead, dBFS, log frequency with 1/3-octave grid; dB grid step adapts to the panel height."
     })
+}
+
+/// Transport button with a painted symbol (triangle play, two vertical bars
+/// pause, square stop, skip symbols) so all buttons align on one height and
+/// the glyphs never degrade to font-dependent squares.
+pub enum TransportSymbol {
+    Play,
+    Pause,
+    Stop,
+    Prev,
+    Next,
+    Cancel,
+}
+
+pub fn transport_button(ui: &mut egui::Ui, symbol: TransportSymbol, filled: bool) -> Response {
+    let (rect, mut response) = ui.allocate_exact_size(l::TRANSPORT_BTN.into(), Sense::click());
+    if response.hovered() {
+        response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
+    let fill = if filled {
+        theme::AMBER
+    } else if response.hovered() {
+        theme::RAISED
+    } else {
+        theme::PANEL
+    };
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, l::CARD_RADIUS, fill);
+    let ink = if filled { Color32::BLACK } else { theme::TEXT };
+    let c = rect.center();
+    let w = rect.width() * 0.30;
+    let h = rect.height() * 0.32;
+    match symbol {
+        TransportSymbol::Play => {
+            let tip = pos2(c.x + w * 0.9, c.y);
+            let a = pos2(c.x - w, c.y - h);
+            let b = pos2(c.x - w, c.y + h);
+            painter.add(egui::Shape::convex_polygon(
+                vec![a, b, tip],
+                ink,
+                Stroke::NONE,
+            ));
+        }
+        TransportSymbol::Pause => {
+            // Two vertical bars.
+            let bw = w * 0.45;
+            for dx in [-w * 0.55, w * 0.55] {
+                painter.rect_filled(
+                    egui::Rect::from_center_size(pos2(c.x + dx, c.y), vec2(bw, h * 2.0)),
+                    1,
+                    ink,
+                );
+            }
+        }
+        TransportSymbol::Stop => {
+            painter.rect_filled(
+                egui::Rect::from_center_size(c, vec2(w * 1.6, h * 1.6)),
+                1,
+                ink,
+            );
+        }
+        TransportSymbol::Cancel => {
+            let r = h;
+            painter.line_segment(
+                [pos2(c.x - r, c.y - r), pos2(c.x + r, c.y + r)],
+                Stroke::new(2.0, ink),
+            );
+            painter.line_segment(
+                [pos2(c.x - r, c.y + r), pos2(c.x + r, c.y - r)],
+                Stroke::new(2.0, ink),
+            );
+        }
+        TransportSymbol::Prev | TransportSymbol::Next => {
+            let dir = if matches!(symbol, TransportSymbol::Next) {
+                1.0
+            } else {
+                -1.0
+            };
+            // Bar + triangle.
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    pos2(c.x - dir * w * 0.9, c.y),
+                    vec2(w * 0.35, h * 2.0),
+                ),
+                1,
+                ink,
+            );
+            let tip = pos2(c.x + dir * w * 0.9, c.y);
+            let a = pos2(c.x - dir * w * 0.2, c.y - h);
+            let b = pos2(c.x - dir * w * 0.2, c.y + h);
+            painter.add(egui::Shape::convex_polygon(
+                vec![a, b, tip],
+                ink,
+                Stroke::NONE,
+            ));
+        }
+    }
+    response
 }
 
 /// Pick the smallest dB grid step that still leaves enough pixels between

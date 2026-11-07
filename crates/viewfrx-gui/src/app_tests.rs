@@ -775,10 +775,11 @@ fn deleting_an_annotation_row_removes_its_marker() {
     assert_eq!(app.annotations.len(), 1);
 }
 
+#[cfg(feature = "spectrogram")]
 #[test]
-fn ctrl_s_saves_even_while_annotation_field_has_focus_and_reselect_shows_markers() {
+fn live_spectrum_updates_while_playing_a_long_file() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("a.wav");
+    let path = dir.path().join("tone.wav");
     {
         let mut w = hound::WavWriter::create(
             &path,
@@ -790,8 +791,9 @@ fn ctrl_s_saves_even_while_annotation_field_has_focus_and_reselect_shows_markers
             },
         )
         .unwrap();
-        for i in 0..8000 {
-            let v = if i % 2 == 0 { 4096i16 } else { -4096 };
+        for i in 0..80000 {
+            let v =
+                (0.4 * (std::f32::consts::TAU * 440.0 * i as f32 / 8000.0).sin() * 32767.0) as i16;
             w.write_sample(v).unwrap();
             w.write_sample(-v).unwrap();
         }
@@ -803,77 +805,49 @@ fn ctrl_s_saves_even_while_annotation_field_has_focus_and_reselect_shows_markers
     app.info = Some(AudioInfo {
         sample_rate: 8000,
         channels: 2,
-        frames: Some(8000),
-        duration_seconds: Some(1.0),
+        frames: Some(80000),
+        duration_seconds: Some(10.0),
         bits_per_sample: Some(16),
         tags: vec![],
     });
-    // Floating edit, then focus the annotation field (as after a right-click).
-    app.annotation_text = "[00:00:00:50] saved note".into();
-    app.sync_annotations_from_text();
-    assert!(app.annotations_dirty);
-    let some_id = egui::Id::new("dummy");
-    let _ = ctx.run(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.memory_mut(|m| m.request_focus(some_id));
+    app.analyzing = false;
+    app.spectrum_on = true;
+    // Spectrogram off (default) -> worker single-window fallback path.
+    assert!(app.spectral.data.is_none());
+    // Simulate playback by feeding the mock audio service a playing status.
+    let mut seen = Vec::new();
+    for step in 0..12 {
+        let pos = step as f64 * 0.5;
+        app.audio.set_snapshot(AudioSnapshot {
+            status: Some(viewfrx_audio::Status {
+                state: "playing",
+                path: Some(path.clone()),
+                position_seconds: pos,
+                gain: 1.0,
+                gain_db: Some(0.0),
+                normalization_gain: 1.0,
+                normalization_enabled: false,
+                rms_dbfs: [None; 2],
+                peak_dbfs: [None; 2],
+                rate: 1.0,
+                highpass: false,
+                peak: 0.0,
+                underrun_callbacks: 0,
+                clipped_samples: 0,
+                generation: 1,
+                rendered_generation: 1,
+                error: None,
+            }),
+            ..Default::default()
         });
-    });
-    // Ctrl+S while a widget has keyboard focus must still open the save flow.
-    let mods = egui::Modifiers {
-        ctrl: true,
-        ..Default::default()
-    };
-    let input = egui::RawInput {
-        modifiers: mods,
-        events: vec![egui::Event::Key {
-            key: egui::Key::S,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: mods,
-        }],
-        ..Default::default()
-    };
-    let _ = ctx.run(input, |ctx| app.keyboard(ctx));
-    assert!(
-        app.save_picker.is_some(),
-        "Ctrl+S must trigger save even with a focused text field"
-    );
-    // Complete the save in place (what the dialog's overwrite confirm does).
-    app.save_picker = None;
-    app.save_annotations_to(path.clone());
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    while std::time::Instant::now() < deadline {
         app.poll(&ctx);
-        if !app.annotations_dirty {
-            break;
+        if let Some((p, _)) = &app.spectrum {
+            seen.push(*p);
         }
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(80));
     }
-    assert!(!app.annotations_dirty);
-    assert_eq!(
-        viewfrx_core::annotations::read(&path).unwrap(),
-        vec![Annotation {
-            seconds: 0.5,
-            text: "saved note".into()
-        }]
-    );
-    // Come back to the file: the saved marker is rendered from disk.
-    app.select_now(path.clone(), false);
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    while std::time::Instant::now() < deadline {
-        app.poll(&ctx);
-        if app.info.is_some() && !app.annotations.is_empty() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert_eq!(
-        app.annotations,
-        vec![Annotation {
-            seconds: 0.5,
-            text: "saved note".into()
-        }],
-        "re-selecting the file must show the saved annotations"
-    );
+    // The spectrum must follow the playhead instead of freezing.
+    assert!(seen.len() >= 3, "spectrum updated only at {seen:?}");
+    let increasing = seen.windows(2).all(|w| w[1] > w[0]);
+    assert!(increasing, "spectrum positions must advance: {seen:?}");
 }

@@ -108,8 +108,11 @@ pub mod layout {
     pub const PLOT_MIN_HEIGHT: f32 = 100.0;
     pub const PLOT_MAX_HEIGHT: f32 = 380.0;
     #[cfg(feature = "spectrogram")]
-    pub const SPECTRAL_HEIGHT_FRACTION: f32 = 0.5;
-    pub const PLAY_SIZE: [f32; 2] = [110.0, 38.0];
+    pub const SPECTRAL_HEIGHT_FRACTION: f32 = 0.35;
+    /// Default waveform share of the plot area on startup (less than half).
+    pub const WAVE_HEIGHT_FRACTION: f32 = 0.45;
+    /// All transport buttons share this size so they align on one height.
+    pub const TRANSPORT_BTN: [f32; 2] = [46.0, 34.0];
     pub const GRID_X_DIVISIONS: usize = 10;
     pub const GRID_Y_DIVISIONS: usize = 4;
     pub const WAVE_SCALE: f32 = 0.43;
@@ -151,4 +154,8 @@ pub mod layout {
     pub const ANNOTATION_TAG_H: f32 = 12.0;
     /// Hover distance (px) within which a marker shows its preview tooltip.
     pub const ANNOTATION_HOVER_PX: f32 = 6.0;
+    /// Minimum horizontal px between spectrum xtick labels; labels are
+    /// thinned dynamically when the panel is narrower.
+    #[cfg(feature = "spectrogram")]
+    pub const SPECTRUM_MIN_XTICK_LABEL_PX: f32 = 34.0;
 }

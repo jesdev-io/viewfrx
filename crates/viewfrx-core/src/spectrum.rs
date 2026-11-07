@@ -77,7 +77,7 @@ impl Spectrum {
     /// already-computed spectrogram column — spectrum and spectrogram share
     /// the same STFT data and FFT settings, so no re-decode is needed.
     pub fn from_column(spec: &Spectrogram, position_seconds: f64) -> Spectrum {
-        let col_seconds = spec.hop_size as f64 / spec.sample_rate.max(1) as f64;
+        let col_seconds = spec.column_seconds();
         let column = if col_seconds > 0.0 && spec.columns > 0 {
             ((position_seconds / col_seconds) as usize).min(spec.columns - 1)
         } else {
@@ -205,6 +205,41 @@ mod tests {
         assert!(analyze_at(&path, Settings { fft_size: 1000 }, 0.0, || false).is_err());
         // Cancellation works.
         assert!(analyze_at(&path, Settings { fft_size: 1024 }, 0.0, || true).is_err());
+    }
+
+    #[test]
+    fn from_column_tracks_late_positions_on_compacted_long_files() {
+        use crate::spectrogram;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("long.wav");
+        tone(&path, 1024.0, 20); // 20 s @ 8192 Hz -> overview compacts past 512 columns
+        let spec = spectrogram::analyze(&path, Settings { fft_size: 512 }, || false).unwrap();
+        assert!(
+            spec.windows_per_column > 1,
+            "long file must compact columns"
+        );
+        assert!(spec.columns <= 512);
+        // Late position must map to a late column (not clamped early).
+        let pos = 0.75 * spec.duration_seconds();
+        let expected_col = ((pos / spec.column_seconds()) as usize).min(spec.columns - 1);
+        assert!(expected_col > spec.columns * 2 / 3, "col {expected_col}");
+        let from_col = Spectrum::from_column(&spec, pos);
+        let direct = analyze_at(&path, Settings { fft_size: 512 }, pos, || false).unwrap();
+        let peak_col = from_col
+            .dbfs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        let peak_dir = direct
+            .dbfs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        assert_eq!(peak_col, peak_dir, "spectrum must not freeze on long files");
     }
 
     #[test]
