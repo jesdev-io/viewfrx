@@ -683,7 +683,10 @@ mod tests {
         wav_fixture(&src, 400)?;
         let before = fs::read(&src)?;
         let dst = dir.path().join("copy.wav");
-        let added = vec![Annotation { seconds: 1.0, text: "note".into() }];
+        let added = vec![Annotation {
+            seconds: 1.0,
+            text: "note".into(),
+        }];
         save_as(&src, &dst, &added)?;
         assert_eq!(fs::read(&src)?, before, "source must be untouched");
         assert_eq!(read(&dst)?, added);

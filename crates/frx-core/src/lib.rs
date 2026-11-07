@@ -6,7 +6,7 @@ pub mod config;
 pub mod decode;
 pub mod levels;
 #[cfg(feature = "spectrogram")]
-pub mod spectrum;
-#[cfg(feature = "spectrogram")]
 pub mod spectrogram;
+#[cfg(feature = "spectrogram")]
+pub mod spectrum;
 pub mod waveform;

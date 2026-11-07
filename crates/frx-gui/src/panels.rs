@@ -431,10 +431,18 @@ impl App {
         ui.separator();
         #[cfg(feature = "spectrogram")]
         {
-            if widgets::reset_toggle(ui, &mut self.spectrum_on, c::SPECTRUM_DEFAULT, "Spectrum (live)")
-                .changed()
+            if widgets::reset_toggle(
+                ui,
+                &mut self.spectrum_on,
+                c::SPECTRUM_DEFAULT,
+                "Spectrum (live)",
+            )
+            .changed()
             {
-                crate::logln!("spectrum view {}", if self.spectrum_on { "on" } else { "off" });
+                crate::logln!(
+                    "spectrum view {}",
+                    if self.spectrum_on { "on" } else { "off" }
+                );
             }
             ui.small(
                 RichText::new("Magnitude spectrum at the playhead, bottom right. Shows HPF state.")

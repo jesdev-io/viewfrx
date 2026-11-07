@@ -45,6 +45,13 @@
 - Symbol transport buttons, top-bar menu exporting main CLI actions, debug console window (GUI) and `--verbose` log lines (CLI).
 - Stateless sessions: no catalog persistence, temporary default analysis caches.
 
+## Delivered: spectrum, zoom/heights, annotation save workflow
+
+- Live configurable magnitude spectrum (core `spectrum` analysis, CLI `spectrum`, GUI panel bottom-right of the center area with toggle and HPF indicator), updated at the playhead while playing.
+- Waveform and spectrogram heights are resizable by dragging their bottom edges; one shared time-zoom window scales all waveforms and spectrograms in tandem (zoom buttons or scroll wheel over a plot; double-click resets/rewinds). CLI parity via `waveform/spectrogram --from/--to`.
+- Annotations are floating while a file is viewed; Ctrl+S / File menu opens a standard save dialog (naming + overwrite warning) that persists them atomically; switching files with unsaved changes warns (Save / Dismiss / Cancel). CLI: `annotate` (in place or `--output` copy) and `annotations`.
+- Resource metrics (binary size, peak RSS, latency) measured and documented; CPAL confirmed as the non-EOL backend choice.
+
 ## Next GUI work
 
 - Separate magnitude spectrum, annotated metadata editing and an optional IEC-calibrated VU mode, after adding their headless APIs.

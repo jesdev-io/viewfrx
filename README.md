@@ -29,9 +29,11 @@ cargo build --release --workspace --features spectrogram --locked
 - **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use **+ Files**, **+ Folder**, the **File** menu, drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
 - **Center:** metadata cards (including the DC offset in dBFS), DC-removed waveform(s) with a subdued −1 dBFS normalized overlay, optional source spectrogram(s), click/drag seeking, right-click timestamp markers, a bottom annotation field, and symbol transport buttons (▶ play, ❚❚ pause, ■ stop, ⏮/⏭ browse).
 - **Stereo views:** waveform and spectrogram each get a **Left / Right / Both** selector and are grouped as WAVE L, WAVE R, SPEC L, SPEC R (stereo recordings only).
+- **Resizable/zoomable plots:** drag a plot's bottom edge to resize it; zoom any subsection to full width with the −/+ buttons or the scroll wheel over a plot — all waveforms and spectrograms share the zoom window, and seeking/playhead/markers/time readout follow it. Double-click a plot rewinds and resets the zoom.
+- **Live spectrum:** a toggleable magnitude-spectrum panel at the bottom right of the center area (left of the options box), recomputed at the playhead while playing; it shows the highpass state when the filter is on.
 - **Right:** output device, gain in dB, Normalize, pitch-changing rate, fixed highpass toggle, vertical stereo RMS/peak meters in dBFS, FFT size and spectral display floor, and a debug-console toggle.
 - **Top bar:** File / Playback / View menus export the main CLI-equivalent actions.
-- **Annotations:** type `[dd:hh:mm:ss] note` in the bottom field (Enter) or right-click a plot at a position; markers are stored in the file's own metadata (WAV LIST/INFO, MP3 ID3v2), stay playable in any player, render as vertical lines and in the field, and are idempotent.
+- **Annotations:** type `[dd:hh:mm:ss] note` in the bottom field (Enter) or right-click a plot at a position; markers render as vertical lines and in the field and are idempotent. They stay **floating** until you save with **Ctrl+S** or **File → Save annotations**, which opens a standard save dialog (naming + overwrite warning) and writes them into the file's own metadata (WAV LIST/INFO, MP3 ID3v2) — the file stays a normal playable audio file. Switching files with unsaved annotations warns first (Save / Dismiss / Cancel).
 - **Double-click to reset:** gain returns to 0 dB/unity and unmutes; rate to 1×; toggles, device and spectral settings to their defaults. Double-click a plot to rewind.
 - **Keys:** Space play/pause; Up/Down browse visible results; Left/Right seek five seconds; Esc stop. Shortcuts do not intercept text entry.
 - **JESDEV theme:** dark compact panels, amber waveform/actions, purple playhead, teal annotation markers, bundled logo with provenance.
@@ -66,7 +68,10 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 ./target/release/frxview waveform '/path/to/recording.wav' --stereo
 ./target/release/frxview annotate '/path/to/recording.wav' '[00:00:12:00] thunder'
 ./target/release/frxview annotate '/path/to/recording.wav' --seconds 42 'clap'
+./target/release/frxview annotate '/path/to/recording.wav' --output '/path/copy.wav' '[00:00:12:00] thunder'
 ./target/release/frxview annotations '/path/to/recording.wav'
+./target/release/frxview spectrum '/path/to/recording.wav' --position 12.5
+./target/release/frxview waveform '/path/to/recording.wav' --from 10 --to 20
 ```
 
 - Results are JSON; `list` emits one JSON object per file. Application errors go to stderr with a nonzero exit code; Clap usage errors use its standard text output.
@@ -77,8 +82,8 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 - `--normalize` applies linked-channel sample-peak gain to reach −1 dBFS **before manual gain**, computed on the **DC-removed** signal. It preserves stereo balance and leaves silence unchanged. This is not loudness/true-peak normalization. The CLI computes or loads peak analysis before starting; the GUI waits without blocking its event loop and never starts normalized playback at an unanalysed gain.
 - Playback always removes DC offset with a one-pole DC blocker and applies a short onset/offset fade (anti dirac-pop). `--highpass` additionally enables a fixed 20 Hz highpass against infra-sound. `levels` reports the per-channel DC offset in linear and dBFS, raw and DC-removed peaks, and the normalization. `benchmark --highpass` applies the same chain.
 - `waveform --channel N` / `--stereo` select per-channel overviews; `spectrogram --channel N` / `--stereo` do the same for spectral analysis.
-- `annotate` merges `[dd:hh:mm:ss]` markers (or `--seconds`) into the file's own metadata (WAV LIST INFO / MP3 ID3v2) atomically, without altering the audio data; identical annotations are never duplicated. `annotations` lists them. Both are also session ops.
-- Global `--verbose` pipes console log lines to stderr as JSON (headless counterpart of the GUI debug console).
+- `annotate` merges `[dd:hh:mm:ss]` markers (or `--seconds`) into the file's own metadata (WAV LIST INFO / MP3 ID3v2) atomically, without altering the audio data; identical annotations are never duplicated. `--output DST` saves an annotated copy instead of modifying the source (the GUI save-dialog equivalent). `annotations` lists them. Both are also session ops. In the GUI, markers are floating until saved via Ctrl+S / the File menu; switching files with unsaved markers warns first.
+- `spectrum` (feature `spectrogram`) returns one calibrated magnitude spectrum in dBFS at `--position`; `waveform`/`spectrogram` accept `--from/--to` zoom windows. Global `--verbose` pipes console log lines to stderr as JSON (headless counterpart of the GUI debug console).
 - `spectrogram` requires its Cargo feature. The CLI returns the same calibrated, bounded STFT overview used by the GUI; its separate 64 MiB cache is temporary unless `--cache DIR` is supplied.
 - Rate is 0.25–4 and **changes pitch**. Linear interpolation is a preview implementation, not antialiased resampling or pitch-preserving time stretching.
 - Use `--device INDEX` on `play` or `session` to choose an output. Indices come from `devices` and may change when hardware changes. The device's default sample rate/channel count is used; a small supported output buffer is requested.

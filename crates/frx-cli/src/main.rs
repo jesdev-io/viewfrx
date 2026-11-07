@@ -273,17 +273,20 @@ fn run() -> Result<()> {
                         to.unwrap_or(f64::INFINITY),
                         waveform.duration_seconds(),
                     )?;
-                    Some(serde_json::json!({"from": from, "to": to, "duration": waveform.duration_seconds()}))
+                    Some(
+                        serde_json::json!({"from": from, "to": to, "duration": waveform.duration_seconds()}),
+                    )
                 }
             };
-            let windowed = |w: &frx_core::waveform::Waveform| -> Result<frx_core::waveform::Waveform> {
-                match (from, to) {
-                    (None, None) => Ok(w.clone()),
-                    _ => w
-                        .windowed(from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
-                        .context("invalid zoom window"),
-                }
-            };
+            let windowed =
+                |w: &frx_core::waveform::Waveform| -> Result<frx_core::waveform::Waveform> {
+                    match (from, to) {
+                        (None, None) => Ok(w.clone()),
+                        _ => w
+                            .windowed(from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
+                            .context("invalid zoom window"),
+                    }
+                };
             if stereo {
                 if waveform.channels() != 2 {
                     bail!("--stereo requires a stereo recording");
@@ -291,14 +294,22 @@ fn run() -> Result<()> {
                 let channels = (0..2)
                     .map(|ch| {
                         Ok(match (from, to) {
-                            (None, None) => waveform.channel_waveform(ch).context("missing channel")?,
+                            (None, None) => {
+                                waveform.channel_waveform(ch).context("missing channel")?
+                            }
                             _ => waveform
-                                .channel_windowed(ch, from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
+                                .channel_windowed(
+                                    ch,
+                                    from.unwrap_or(0.0),
+                                    to.unwrap_or(f64::INFINITY),
+                                )
                                 .with_context(|| format!("source channel {ch} does not exist"))?,
                         })
                     })
                     .collect::<Result<Vec<_>>>()?;
-                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "channels": channels}))?;
+                emit(
+                    &serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "channels": channels}),
+                )?;
             } else if let Some(ch) = channel {
                 let view = match (from, to) {
                     (None, None) => waveform
@@ -308,9 +319,13 @@ fn run() -> Result<()> {
                         .channel_windowed(ch, from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
                         .with_context(|| format!("source channel {ch} does not exist"))?,
                 };
-                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "waveform": view}))?;
+                emit(
+                    &serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "waveform": view}),
+                )?;
             } else if window.is_some() {
-                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "waveform": windowed(waveform)?}))?;
+                emit(
+                    &serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "waveform": windowed(waveform)?}),
+                )?;
             } else {
                 emit(&cached)?;
             }
@@ -344,7 +359,9 @@ fn run() -> Result<()> {
                                 cache_hit: bool|
              -> Result<()> {
                 match (from, to) {
-                    (None, None) => emit(&serde_json::json!({"cache_hit": cache_hit, "spectrogram": s})),
+                    (None, None) => {
+                        emit(&serde_json::json!({"cache_hit": cache_hit, "spectrogram": s}))
+                    }
                     _ => {
                         let windowed = s
                             .windowed(from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
@@ -431,7 +448,9 @@ fn run() -> Result<()> {
                 }
                 None => annotations::annotate(&path, &new)?,
             };
-            emit(&json!({"path": path, "output": output, "annotations": annotations::to_json(&stored)}))?;
+            emit(
+                &json!({"path": path, "output": output, "annotations": annotations::to_json(&stored)}),
+            )?;
         }
         Action::Annotations { path } => {
             let stored = annotations::read(&path)?;

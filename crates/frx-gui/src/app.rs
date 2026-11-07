@@ -11,7 +11,7 @@ use crate::widgets::waveform_view;
 use crate::{
     Args,
     config::{controls as c, layout as l, runtime as r},
-    model::{Browser, TimeWindow, seek_at},
+    model::{Browser, TimeWindow},
     services::{
         AnalysisEvent, AnalysisOptions, AnalysisService, AudioRequest, AudioService, AudioSnapshot,
         FileEvent, FileService, LibraryService, ScanEvent,
@@ -320,7 +320,10 @@ impl App {
     fn select(&mut self, path: PathBuf, audition: bool) {
         // Unsaved floating annotations: warn before switching files.
         if self.annotations_dirty {
-            crate::logln!("unsaved annotations; asking before switching to {}", path.display());
+            crate::logln!(
+                "unsaved annotations; asking before switching to {}",
+                path.display()
+            );
             self.pending_selection = Some((path, audition));
             return;
         }
@@ -471,19 +474,6 @@ impl App {
             let event = self.files.rx.try_recv();
             let Ok(event) = event else { break };
             match event {
-                FileEvent::AnnotationsWritten(id, result) if id == self.file_id => match result {
-                    Ok(list) => {
-                        crate::logln!("annotations written: {} marker(s)", list.len());
-                        self.annotations = list.clone();
-                        self.saved_annotations = list;
-                        self.annotations_dirty = false;
-                        self.annotation_text = annotations::format_annotations(&self.annotations);
-                    }
-                    Err(error) => {
-                        crate::logln!("annotation write failed: {error}");
-                        self.error = Some(error);
-                    }
-                },
                 FileEvent::AnnotationsSaved(id, result) if id == self.file_id => match result {
                     Ok((dst, list)) => {
                         crate::logln!(
@@ -491,11 +481,10 @@ impl App {
                             dst.display(),
                             list.len()
                         );
-                        let same = self
-                            .browser
-                            .selected
-                            .as_ref()
-                            .is_some_and(|src| src.canonicalize().ok() == dst.canonicalize().ok());
+                        let same =
+                            self.browser.selected.as_ref().is_some_and(|src| {
+                                src.canonicalize().ok() == dst.canonicalize().ok()
+                            });
                         self.annotations = list.clone();
                         self.saved_annotations = list;
                         self.annotations_dirty = false;
@@ -540,9 +529,7 @@ impl App {
                 .status
                 .as_ref()
                 .is_some_and(|s| s.state == "playing" && s.path == self.browser.selected);
-            if playing
-                && let Some(path) = self.browser.selected.clone()
-            {
+            if playing && let Some(path) = self.browser.selected.clone() {
                 let pos = self.position();
                 if (pos - self.last_spectrum_pos).abs() >= c::SPECTRUM_UPDATE_SECONDS {
                     self.last_spectrum_pos = pos;
@@ -569,7 +556,9 @@ impl App {
             self.annotation_text = annotations::format_annotations(&self.annotations);
             crate::logln!(
                 "annotation added (floating, {} unsaved change(s))",
-                self.annotations.len().saturating_sub(self.saved_annotations.len())
+                self.annotations
+                    .len()
+                    .saturating_sub(self.saved_annotations.len())
             );
         }
     }
@@ -722,7 +711,12 @@ impl App {
         let duration = self.duration();
         let window = self.window();
         self.zoom = if factor < 1.0 {
-            Some(window.zoom_in(center_fraction, 1.0 / factor.max(1e-9), c::ZOOM_MIN_SECONDS, duration))
+            Some(window.zoom_in(
+                center_fraction,
+                1.0 / factor.max(1e-9),
+                c::ZOOM_MIN_SECONDS,
+                duration,
+            ))
         } else {
             window.zoom_out(center_fraction, factor, duration)
         };
@@ -740,7 +734,7 @@ impl App {
             self.zoom = None; // double-click also resets the zoom to the full view
             return;
         }
-        let fraction = |ui: &egui::Ui| {
+        let fraction = || {
             response
                 .interact_pointer_pos()
                 .map(|p| (p.x - response.rect.left()) / response.rect.width())
@@ -750,18 +744,18 @@ impl App {
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y + i.raw_scroll_delta.y);
             if scroll > 0.0 {
-                if let Some(f) = fraction(ui) {
+                if let Some(f) = fraction() {
                     self.zoom_at(f, 1.0 / c::ZOOM_FACTOR);
                 }
-            } else if scroll < 0.0 {
-                if let Some(f) = fraction(ui) {
-                    self.zoom_at(f, c::ZOOM_FACTOR);
-                }
+            } else if scroll < 0.0
+                && let Some(f) = fraction()
+            {
+                self.zoom_at(f, c::ZOOM_FACTOR);
             }
         }
         // Right-click at a time position creates a timestamp annotation there.
         if response.secondary_clicked()
-            && let Some(f) = fraction(ui)
+            && let Some(f) = fraction()
             && let Some(seconds) = self.window().fraction_to_time(f)
         {
             self.add_annotations(vec![Annotation {
@@ -774,7 +768,7 @@ impl App {
             || response.drag_stopped()
             || (response.dragged()
                 && self.seek_sent.elapsed() > Duration::from_millis(r::SEEK_THROTTLE_MS)))
-            && let Some(f) = fraction(ui)
+            && let Some(f) = fraction()
             && let Some(seconds) = self.window().fraction_to_time(f)
         {
             self.seek(seconds);
@@ -814,10 +808,8 @@ impl App {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.stop();
         }
-        let save = ctx.input(|i| {
-            i.key_pressed(egui::Key::S)
-                && (i.modifiers.command || i.modifiers.ctrl)
-        });
+        let save =
+            ctx.input(|i| i.key_pressed(egui::Key::S) && (i.modifiers.command || i.modifiers.ctrl));
         if save && self.annotations_dirty {
             self.request_save_dialog(ctx);
         }

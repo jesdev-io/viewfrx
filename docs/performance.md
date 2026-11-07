@@ -45,6 +45,24 @@ The updated device script also verifies live normalization, normalized start, re
 
 An additional [uncached 10-minute WAV GUI run](long-analysis-gui-baseline.json) completed waveform and spectral analysis while rendering 297 updates during a five-second hold. Maximum measured update CPU was ~1.31 ms. This exercises background analysis of a longer recording, but remains a warm-filesystem smoke test rather than a sustained-load guarantee.
 
+## Resource metrics (build size, RAM, latency, backend)
+
+Measured 2026-11-07, Rust 1.95 release build (`--workspace --features spectrogram`), Linux x86_64:
+
+| Metric | Observation |
+|---|---:|
+| CLI binary (`frxview`) | ~5.0 MiB |
+| GUI binary (`frxview-gui`, egui/eframe + glow) | ~16 MiB |
+| Peak RSS, decode 600 s stereo WAV (110 MiB file) | ~5.6 MiB |
+| Peak RSS, waveform analysis of the same file | ~5.5 MiB |
+| Peak RSS, spectrogram analysis of the same file | ~10 MiB |
+| Decode throughput, 600 s WAV | ~1100× realtime |
+| Output buffer requested | 256 frames (~5.3 ms at 48 kHz); command→rendered median ~8 ms |
+
+RAM safety on huge imports: discovery streams directory entries in batches (never loads file contents); decoding is packet-bounded; the playback ring is a fixed 8192 frames; waveform/spectrogram overviews are bounded (≤65536 bins, ≤512×256 columns) and their disk caches have 64 MiB budgets with oldest-first eviction; the GUI caps displayed candidates at 100,000 entries. Importing several GB of recordings therefore costs only path strings plus bounded caches — no RAM deadlock. `scripts/check-performance.py` now reports `binary_bytes`, `gui_binary_bytes` and `peak_rss_kib` per workload alongside the existing timings.
+
+Audio backend: **CPAL** (Apache-2.0) — actively maintained, cross-platform (ALSA/Pulse on Linux, CoreAudio/WASAPI elsewhere), actively developed at the time of writing, not end-of-life. Higher-level wrappers (rodio) hide the device/stream control this app needs; C backends (PortAudio) are effectively unmaintained. See [references.md](references.md).
+
 ## Reproduce
 
 ```sh

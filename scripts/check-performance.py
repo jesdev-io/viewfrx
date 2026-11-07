@@ -81,12 +81,18 @@ def main():
         result = subprocess.run([binary, "list", str(listing)], capture_output=True, text=True, check=True, timeout=30)
         report["list_10000"] = {"ms": (time.perf_counter() - start) * 1000, "entries": len(result.stdout.splitlines())}
         assert report["list_10000"]["entries"] == 10000
+        report["binary_bytes"] = os.path.getsize(binary)
+        gui = ROOT / "target/release/frxview-gui"
+        if gui.exists():
+            report["gui_binary_bytes"] = os.path.getsize(gui)
         if Path("/usr/bin/time").exists():
             report["peak_rss_kib"] = {}
-            for path in [short, long]:
+            for label, cmd in [("benchmark", ["benchmark", str(long)]),
+                               ("waveform", ["waveform", str(long), "--cache", str(tmp / "rss-cache")]),
+                               ("spectrogram", ["spectrogram", str(long), "--cache", str(tmp / "rss-spec")])]:
                 usage = tmp / "rss.txt"
-                subprocess.run(["/usr/bin/time", "-f", "%M", "-o", str(usage), binary, "benchmark", str(path)], stdout=subprocess.DEVNULL, check=True, timeout=120)
-                report["peak_rss_kib"][path.name] = int(usage.read_text().strip())
+                subprocess.run(["/usr/bin/time", "-f", "%M", "-o", str(usage), binary, *cmd], stdout=subprocess.DEVNULL, check=True, timeout=120)
+                report["peak_rss_kib"][label] = int(usage.read_text().strip())
         if args.audio:
             command = [binary, "session"]
             if args.device is not None:

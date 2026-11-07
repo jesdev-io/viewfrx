@@ -357,11 +357,16 @@ pub struct AnalysisOptions {
 enum AnalysisJobKind {
     Full,
     #[cfg(feature = "spectrogram")]
-    Spectrum { fft_size: usize, position: f64 },
+    Spectrum {
+        fft_size: usize,
+        position: f64,
+    },
 }
 struct AnalysisJob {
     id: u64,
     path: PathBuf,
+    // Only spectrum requests read this without the spectrogram feature.
+    #[cfg_attr(not(feature = "spectrogram"), allow(dead_code))]
     kind: AnalysisJobKind,
     #[cfg(feature = "spectrogram")]
     options: AnalysisOptions,
@@ -405,7 +410,12 @@ impl AnalysisService {
                         cancelled,
                     )
                     .map_err(|e| format!("{e:#}"));
-                    deliver(&tx, AnalysisEvent::Spectrum(id, position, result), cancelled, &ctx);
+                    deliver(
+                        &tx,
+                        AnalysisEvent::Spectrum(id, position, result),
+                        cancelled,
+                        &ctx,
+                    );
                     continue;
                 }
                 let info = inspect(&path).map_err(|e| format!("{e:#}"));
@@ -500,14 +510,14 @@ impl Drop for AnalysisService {
 /// egui update(). Results carry a generation so stale writes cannot clobber
 /// a newer selection.
 pub enum FileEvent {
-    /// In-place annotate finished; returns the full stored list.
-    AnnotationsWritten(u64, Result<Vec<Annotation>, String>),
     /// Save-as finished; returns (destination, stored list).
     AnnotationsSaved(u64, Result<(PathBuf, Vec<Annotation>), String>),
 }
 enum FileJobKind {
-    Annotate { new: Vec<Annotation> },
-    SaveAs { dst: PathBuf, annotations: Vec<Annotation> },
+    SaveAs {
+        dst: PathBuf,
+        annotations: Vec<Annotation>,
+    },
 }
 struct FileJob {
     id: u64,
@@ -536,20 +546,9 @@ impl FileService {
                     thread::sleep(Duration::from_millis(POLL_MS));
                     continue;
                 };
-                let cancelled = || {
-                    stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != job.id
-                };
+                let cancelled =
+                    || stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != job.id;
                 match job.kind {
-                    FileJobKind::Annotate { new } => {
-                        let result = annotations::annotate(&job.src, &new)
-                            .map_err(|e| format!("{e:#}"));
-                        deliver(
-                            &tx,
-                            FileEvent::AnnotationsWritten(job.id, result),
-                            cancelled,
-                            &ctx,
-                        );
-                    }
                     FileJobKind::SaveAs { dst, annotations } => {
                         let result = annotations::save_as(&job.src, &dst, &annotations)
                             .and_then(|_| annotations::read(&dst))
@@ -572,18 +571,13 @@ impl FileService {
             rx,
         }
     }
-    /// Merge annotations into the file in place (CLI-equivalent write).
-    pub fn write_annotations(&self, src: PathBuf, new: Vec<Annotation>) -> u64 {
-        let id = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-        *self.job.lock().unwrap() = Some(FileJob {
-            id,
-            src,
-            kind: FileJobKind::Annotate { new },
-        });
-        id
-    }
     /// Save the given annotation list to dst (save dialog target).
-    pub fn save_annotations_as(&self, src: PathBuf, dst: PathBuf, annotations: Vec<Annotation>) -> u64 {
+    pub fn save_annotations_as(
+        &self,
+        src: PathBuf,
+        dst: PathBuf,
+        annotations: Vec<Annotation>,
+    ) -> u64 {
         let id = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         *self.job.lock().unwrap() = Some(FileJob {
             id,

@@ -269,9 +269,8 @@ fn actual_waveform_click_maps_to_timeline_position() {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let response = waveform_view(ui, None, 0.0, 60.0, 120.0);
                 if response.clicked() {
-                    seek = seek_at(
+                    seek = TimeWindow::full(60.0).fraction_to_time(
                         (position.x - response.rect.left()) / response.rect.width(),
-                        60.0,
                     );
                 }
             });
@@ -360,7 +359,10 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
         });
     }
     assert_eq!(app.annotations.len(), 2);
-    assert!(app.annotations.contains(&Annotation { seconds: 1.0, text: String::new() }));
+    assert!(app.annotations.contains(&Annotation {
+        seconds: 1.0,
+        text: String::new()
+    }));
     // Re-submitting the same line is idempotent.
     app.annotation_text = "[00:00:00:02] hello".into();
     app.submit_annotation_text();
@@ -399,10 +401,7 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
         }]
     );
     // File still decodes normally.
-    assert_eq!(
-        frx_core::decode::inspect(&path).unwrap().frames,
-        Some(8000)
-    );
+    assert_eq!(frx_core::decode::inspect(&path).unwrap().frames, Some(8000));
     // Invalid text surfaces an error and changes nothing.
     app.annotation_text = "no marker".into();
     app.submit_annotation_text();

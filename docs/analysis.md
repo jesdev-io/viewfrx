@@ -39,11 +39,16 @@ Sessions accept `play_normalized {path, peak}` and `normalize {path, peak}` oper
 - Playback always removes DC with a one-pole DC blocker (5 Hz, `frx-audio` config). A short 10 ms onset/offset gain fade is applied to the first/last source samples (and after every seek), so recording start/stop and jumps never produce a dirac-pop. The optional fixed highpass (20 Hz, `play --highpass`, session `highpass`, GUI toggle) additionally removes infra-sound. Both filters are preview-grade one-pole sections in the renderer, not room-correction DSP.
 - The GUI waveform plots the DC-removed signal (what you hear); annotation markers are drawn as vertical lines.
 
+## Magnitude spectrum
+
+`frxview spectrum recording.wav --fft-size 2048 --position 12.5` (feature `spectrogram`) computes one Hann-windowed magnitude spectrum in amplitude dBFS at a position — the same calibrated, channel-power-averaged STFT as the spectrogram, but a single window. The GUI uses it for the live spectrum panel at the playhead. `waveform`/`spectrogram --from/--to` emit time-windowed overviews (the GUI zoom equivalent).
+
 ## Timestamp annotations
 
 - Free text with `[dd:hh:mm:ss]` markers (dd = days) becomes annotations: `frxview annotate FILE "[00:00:12:00] thunder"`, or `--seconds 42 "note"` for a position marker (GUI: right-click a plot). Times canonicalize to whole seconds, matching the marker format.
 - Storage is the file's own metadata, written atomically (temp + rename) without touching audio data: WAV gets a `LIST`/`INFO` chunk with a custom `FRXA` sub-chunk inserted before `data` (where players and Symphonia read it); MP3 gets an ID3v2 `TXXX` frame (`frxview-annotations`). All other chunks/frames are preserved, so the file stays a normal playable audio file. Other formats are rejected with an error and left unmodified.
 - Merging is idempotent: identical (time, text) pairs are never duplicated, so text-field entry and right-click markers render each other. `frxview annotations FILE` (and the session op) lists them; the GUI shows them as waveform lines and in the bottom field.
+- In the GUI, new markers are floating (in memory) until saved with Ctrl+S / File → Save annotations, which opens a standard save dialog (file naming, native overwrite warning) and writes atomically via `annotations::save_as`; switching files with unsaved changes warns first (Save / Dismiss / Cancel). On the CLI, `annotate` writes in place and `annotate --output DST` saves an annotated copy, leaving the source untouched.
 
 ## Spectrogram
 

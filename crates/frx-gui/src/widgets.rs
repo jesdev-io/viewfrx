@@ -339,7 +339,8 @@ pub fn spectrum_view(
         if bins > 1 {
             let mut previous = None;
             for (i, &db) in spectrum.dbfs.iter().enumerate() {
-                let x = rect.left() + l::SPACE_SMALL
+                let x = rect.left()
+                    + l::SPACE_SMALL
                     + (i as f32 / (bins - 1) as f32) * (rect.width() - 2.0 * l::SPACE_SMALL);
                 let point = pos2(x, y(db));
                 if let Some(p) = previous {

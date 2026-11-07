@@ -26,12 +26,14 @@ pub mod controls {
     pub const NORMALIZE_DEFAULT: bool = false;
     pub const HIGHPASS_DEFAULT: bool = false;
     pub const DEBUG_CONSOLE_DEFAULT: bool = false;
+    #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_DEFAULT: bool = true;
     /// Minimum zoom window length in seconds.
     pub const ZOOM_MIN_SECONDS: f64 = 0.01;
     /// Zoom step factor for buttons and scroll wheel.
     pub const ZOOM_FACTOR: f64 = 2.0;
     /// Live spectrum re-analysis interval while playing, in seconds.
+    #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_UPDATE_SECONDS: f64 = 0.1;
     pub const SCROLL_CONTEXT_ROWS: usize = 3;
     pub const SLIDER_DECIMALS: usize = 2;
@@ -104,8 +106,10 @@ pub mod layout {
     pub const ITEM_SPACING: [f32; 2] = [10.0, 8.0];
     pub const BUTTON_PADDING: [f32; 2] = [12.0, 7.0];
     pub const DEBUG_WINDOW_SIZE: [f32; 2] = [560.0, 260.0];
+    #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_HEIGHT: f32 = 130.0;
     /// Spectrum panel width as a fraction of the center panel.
+    #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_WIDTH_FRACTION: f32 = 0.55;
     /// Draggable height handle strip thickness in pixels.
     pub const HEIGHT_HANDLE: f32 = 8.0;

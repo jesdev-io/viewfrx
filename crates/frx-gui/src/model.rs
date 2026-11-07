@@ -47,11 +47,6 @@ impl Browser {
     }
 }
 
-pub fn seek_at(fraction: f32, duration: f64) -> Option<f64> {
-    (fraction.is_finite() && duration.is_finite() && duration > 0.0)
-        .then(|| fraction.clamp(0.0, 1.0) as f64 * duration)
-}
-
 /// Shared time-zoom window: all waveforms and spectrograms scale in tandem.
 /// `None` in the app means "full file"; this struct always holds a concrete
 /// clamped window.
@@ -64,7 +59,11 @@ impl TimeWindow {
     pub fn full(duration: f64) -> Self {
         Self {
             start: 0.0,
-            end: if duration.is_finite() { duration.max(0.0) } else { 0.0 },
+            end: if duration.is_finite() {
+                duration.max(0.0)
+            } else {
+                0.0
+            },
         }
     }
     pub fn clamped(self, duration: f64) -> Self {
@@ -99,12 +98,7 @@ impl TimeWindow {
     }
     /// Zoom out by `factor`; returns None (full view) when the window covers
     /// the whole recording.
-    pub fn zoom_out(
-        self,
-        center_fraction: f32,
-        factor: f64,
-        duration: f64,
-    ) -> Option<TimeWindow> {
+    pub fn zoom_out(self, center_fraction: f32, factor: f64, duration: f64) -> Option<TimeWindow> {
         let center = self.fraction_to_time(center_fraction).unwrap_or(self.start);
         let len = self.len() * factor;
         if len >= duration {
@@ -151,10 +145,11 @@ mod tests {
     }
     #[test]
     fn seeking_and_clock_handle_invalid_or_empty_audio() {
-        assert_eq!(seek_at(0.5, 10.0), Some(5.0));
-        assert_eq!(seek_at(2.0, 10.0), Some(10.0));
-        assert_eq!(seek_at(0.5, 0.0), None);
-        assert_eq!(seek_at(f32::NAN, 1.0), None);
+        let full = TimeWindow::full(10.0);
+        assert_eq!(full.fraction_to_time(0.5), Some(5.0));
+        assert_eq!(full.fraction_to_time(2.0), Some(10.0));
+        assert_eq!(TimeWindow::full(0.0).fraction_to_time(0.5), None);
+        assert_eq!(full.fraction_to_time(f32::NAN), None);
         assert_eq!(clock(65.25), "01:05.250");
     }
 
@@ -163,19 +158,38 @@ mod tests {
         let full = TimeWindow::full(10.0);
         assert_eq!(full.fraction_to_time(0.5), Some(5.0));
         let z = full.zoom_in(0.5, 2.0, 0.01, 10.0);
-        assert_eq!(z, TimeWindow { start: 2.5, end: 7.5 });
+        assert_eq!(
+            z,
+            TimeWindow {
+                start: 2.5,
+                end: 7.5
+            }
+        );
         assert_eq!(z.fraction_to_time(0.0), Some(2.5));
         assert_eq!(z.time_to_fraction(5.0), 0.5);
         // Zooming out past the full duration resets to the full view.
         assert_eq!(z.zoom_out(0.5, 4.0, 10.0), None);
         assert_eq!(z.zoom_out(0.5, 2.0, 10.0), None);
         let z2 = z.zoom_out(0.5, 1.5, 10.0).unwrap();
-        assert_eq!(z2, TimeWindow { start: 1.25, end: 8.75 });
+        assert_eq!(
+            z2,
+            TimeWindow {
+                start: 1.25,
+                end: 8.75
+            }
+        );
         // Zoom-in clamps at the file edges and respects the minimum length.
         let edge = full.zoom_in(0.0, 2.0, 0.01, 10.0);
         assert_eq!(edge.start, 0.0);
-        let tiny = TimeWindow { start: 0.0, end: 0.001 }.zoom_in(0.5, 2.0, 0.01, 10.0);
+        let tiny = TimeWindow {
+            start: 0.0,
+            end: 0.001,
+        }
+        .zoom_in(0.5, 2.0, 0.01, 10.0);
         assert!(tiny.len() >= 0.01);
-        assert_eq!(TimeWindow::full(10.0).clamped(10.0).time_to_fraction(20.0), 1.0);
+        assert_eq!(
+            TimeWindow::full(10.0).clamped(10.0).time_to_fraction(20.0),
+            1.0
+        );
     }
 }

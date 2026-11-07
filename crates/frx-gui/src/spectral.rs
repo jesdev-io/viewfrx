@@ -201,8 +201,8 @@ impl View {
             let columns = texture.size()[0].max(1) as f64;
             let col_seconds = self.column_seconds.max(1e-12);
             let start_col = ((window.start / col_seconds) as usize).min(texture.size()[0] - 1);
-            let end_col = ((window.end / col_seconds) as usize + 1)
-                .clamp(start_col + 1, texture.size()[0]);
+            let end_col =
+                ((window.end / col_seconds) as usize + 1).clamp(start_col + 1, texture.size()[0]);
             let uv = egui::Rect::from_min_max(
                 pos2(start_col as f32 / columns as f32, 0.0),
                 pos2(end_col as f32 / columns as f32, 1.0),
