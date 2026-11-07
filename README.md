@@ -26,7 +26,7 @@ cargo build --release --workspace --features spectrogram --locked
 ./target/release/viewfrx-gui
 ```
 
-- **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use **+ Files**, **+ Folder**, the **File** menu, drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
+- **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use the **File** menu (Import files/folder, Refresh), drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
 - **Center:** metadata cards (including the DC offset in dBFS), waveforms first (DC-removed, with a subdued −1 dBFS normalized overlay), then optional source spectrogram(s), click/drag seeking, right-click timestamp markers, symbol transport buttons (▶ play, ❚❚ pause, ■ stop, ⏮/⏭ browse), and a bottom area split into two columns — annotations on the left, the live spectrum on the right — with a vertical resize bar between them.
 - **Stereo views:** waveform and spectrogram each get a **Left / Right / Both** selector and are grouped as WAVE L, WAVE R, SPEC L, SPEC R (stereo recordings only).
 - **Resizable/zoomable plots:** drag a plot's bottom edge to resize it; zoom any subsection to full width with the −/+ buttons or the scroll wheel over a plot — all waveforms and spectrograms share the zoom window, and seeking/playhead/markers/time readout follow it. Double-click a plot rewinds and resets the zoom.

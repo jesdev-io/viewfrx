@@ -47,15 +47,15 @@
 
 ## Delivered: spectrum, zoom/heights, annotation save workflow
 
-- Live configurable magnitude spectrum (core `spectrum` analysis, CLI `spectrum`, GUI panel bottom-right of the center area with toggle and HPF indicator), updated at the playhead while playing.
+- Live configurable magnitude spectrum (core `spectrum` analysis, CLI `spectrum`, GUI spectrum column in the bottom area (toggle, HPF response curve)), updated at the playhead while playing.
 - Waveform and spectrogram heights are resizable by dragging their bottom edges; one shared time-zoom window scales all waveforms and spectrograms in tandem (zoom buttons or scroll wheel over a plot; double-click resets/rewinds). CLI parity via `waveform/spectrogram --from/--to`.
 - Annotations are floating while a file is viewed; Ctrl+S / File menu opens a standard save dialog (naming + overwrite warning) that persists them atomically; switching files with unsaved changes warns (Save / Dismiss / Cancel). CLI: `annotate` (in place or `--output` copy) and `annotations`.
 - Resource metrics (binary size, peak RSS, latency) measured and documented; CPAL confirmed as the non-EOL backend choice.
 
 ## Next GUI work
 
-- Separate magnitude spectrum, annotated metadata editing and an optional IEC-calibrated VU mode, after adding their headless APIs.
-- Waveform zoom/pan and progressive analysis, accessibility/screen-reader testing, persisted user preferences.
+- An optional IEC-calibrated VU mode, after adding its headless API.
+- Waveform pan and progressive analysis, accessibility/screen-reader testing, persisted user preferences. (Time zoom is delivered.)
 - Library-root removal/management; clearer operation-completion events and more stress testing during repeated selections.
 - Native chooser and drag/drop end-to-end tests, sustained playback/UI load tests, HiDPI/multi-monitor coverage and Windows/macOS qualification.
 
