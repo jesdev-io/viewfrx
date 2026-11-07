@@ -128,6 +128,9 @@ enum Action {
         /// Window start in seconds; clamped to the recording.
         #[arg(long)]
         position: Option<f64>,
+        /// Aggregate into log-frequency 1/3-octave bands (max dBFS per band).
+        #[arg(long)]
+        third_octave: bool,
     },
     /// Add timestamp annotations to a file's own metadata (WAV/MP3), without
     /// altering the audio. Idempotent: identical annotations are not duplicated.
@@ -403,15 +406,24 @@ fn run() -> Result<()> {
             path,
             fft_size,
             position,
+            third_octave,
         } => {
             use frx_core::spectrum;
             let settings = frx_core::spectrogram::Settings { fft_size };
-            emit(&spectrum::analyze_at(
-                &path,
-                settings,
-                position.unwrap_or(0.0),
-                || false,
-            )?)?;
+            let result = spectrum::analyze_at(&path, settings, position.unwrap_or(0.0), || false)?;
+            if third_octave {
+                let bands = spectrum::third_octave_bands(&result);
+                emit(&serde_json::json!({
+                    "sample_rate": result.sample_rate,
+                    "position_seconds": result.position_seconds,
+                    "fft_size": result.fft_size,
+                    "third_octave": bands.into_iter().map(|(hz, dbfs)| {
+                        serde_json::json!({"hz": hz, "dbfs": dbfs})
+                    }).collect::<Vec<_>>(),
+                }))?;
+            } else {
+                emit(&result)?;
+            }
         }
         Action::Annotate {
             path,

@@ -41,7 +41,7 @@ Sessions accept `play_normalized {path, peak}` and `normalize {path, peak}` oper
 
 ## Magnitude spectrum
 
-`frxview spectrum recording.wav --fft-size 2048 --position 12.5` (feature `spectrogram`) computes one Hann-windowed magnitude spectrum in amplitude dBFS at a position — the same calibrated, channel-power-averaged STFT as the spectrogram, but a single window. The JSON also carries `third_octave_hz`, the ISO 1/3-octave center frequencies up to Nyquist that the GUI draws as its spectrum grid. The GUI spectrum panel uses a log-frequency axis, a height-dependent dB grid step, and plots the highpass response when enabled. `waveform`/`spectrogram --from/--to` emit time-windowed overviews (the GUI zoom equivalent).
+`frxview spectrum recording.wav --fft-size 2048 --position 12.5` (feature `spectrogram`) computes one Hann-windowed magnitude spectrum in amplitude dBFS at a position — the same calibrated, channel-power-averaged STFT as the spectrogram, but a single window. The JSON also carries `third_octave_hz`, the ISO 1/3-octave center frequencies up to Nyquist that the GUI draws as its spectrum grid, and `--third-octave` aggregates the spectrum into those log-frequency bands (max dBFS per band) for CLI parity with the GUI's log-frequency view. The GUI spectrum panel uses a log-frequency axis, a height-dependent dB grid step, and plots the highpass response when enabled. `waveform`/`spectrogram --from/--to` emit time-windowed overviews (the GUI zoom equivalent).
 
 ## Timestamp annotations
 

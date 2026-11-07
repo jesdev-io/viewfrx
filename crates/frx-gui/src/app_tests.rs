@@ -388,7 +388,7 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while std::time::Instant::now() < deadline {
         app.poll(&ctx);
-        if !app.annotations_dirty {
+        if app.annotations.len() == 1 && !app.annotations_dirty {
             break;
         }
         std::thread::sleep(Duration::from_millis(5));

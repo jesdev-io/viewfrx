@@ -509,3 +509,37 @@ fn annotate_with_output_saves_a_copy_and_leaves_the_original() {
     assert_eq!(first["annotations"], second["annotations"]);
     assert_eq!(first["annotations"].as_array().unwrap().len(), 1);
 }
+
+#[cfg(feature = "spectrogram")]
+#[test]
+fn spectrum_third_octave_is_log_frequency_aggregation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = hound::WavWriter::create(
+        dir.path().join("t.WAV"),
+        hound::WavSpec {
+            channels: 1,
+            sample_rate: 8000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .unwrap();
+    for i in 0..8000 {
+        let v = (0.5 * (std::f32::consts::TAU * 1000.0 * i as f32 / 8000.0).sin() * 32767.0) as i16;
+        w.write_sample(v).unwrap();
+    }
+    w.finalize().unwrap();
+    let bands = success(run(
+        dir.path(),
+        &["spectrum", "t.WAV", "--fft-size", "2048", "--third-octave"],
+    ));
+    let arr = bands["third_octave"].as_array().unwrap();
+    assert!(!arr.is_empty());
+    let (hz, db) = arr
+        .iter()
+        .map(|b| (b["hz"].as_f64().unwrap(), b["dbfs"].as_f64().unwrap()))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap();
+    assert!((hz - 1000.0).abs() < 60.0, "{hz}");
+    assert!((db + 6.0206).abs() < 0.1, "{db}");
+}

@@ -120,12 +120,14 @@ pub mod layout {
     pub const SPECTRUM_HEIGHT: f32 = 130.0;
     /// Annotation column height when no spectrum column is shown.
     pub const ANNOTATION_ROW_DEFAULT: f32 = 64.0;
-    /// Annotation column width bounds; the vertical split bar between the
-    /// annotation and spectrum columns redistributes width within these.
+    /// Annotation column width as a fraction of the bottom area; the vertical
+    /// split bar between the annotation and spectrum columns redistributes it.
     #[cfg(feature = "spectrogram")]
-    pub const ANNOTATION_WIDTH_DEFAULT: f32 = 420.0;
+    pub const ANNOTATION_FRACTION_DEFAULT: f32 = 0.4;
     #[cfg(feature = "spectrogram")]
-    pub const ANNOTATION_WIDTH_MIN: f32 = 220.0;
+    pub const ANNOTATION_FRACTION_MIN: f32 = 0.25;
+    #[cfg(feature = "spectrogram")]
+    pub const ANNOTATION_FRACTION_MAX: f32 = 0.75;
     #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_MIN_WIDTH: f32 = 260.0;
     /// Vertical split bar thickness in pixels.

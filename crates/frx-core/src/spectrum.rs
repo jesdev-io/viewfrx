@@ -29,6 +29,31 @@ pub struct Spectrum {
 /// Lowest grid frequency of the spectrum display, in Hz.
 pub const MIN_GRID_HZ: f32 = 20.0;
 
+/// Aggregate a linear-bin spectrum into 1/3-octave bands (max dBFS per band),
+/// returning (center Hz, dBFS) pairs — the log-frequency view data.
+pub fn third_octave_bands(spectrum: &Spectrum) -> Vec<(f32, f32)> {
+    let nyquist = spectrum.sample_rate as f32 / 2.0;
+    spectrum
+        .third_octave_hz
+        .iter()
+        .map(|&center| {
+            let lo = center * 2f32.powf(-1.0 / 6.0);
+            let hi = center * 2f32.powf(1.0 / 6.0);
+            let first = ((lo / spectrum.hz_per_bin) as usize).min(spectrum.dbfs.len());
+            let last = (((hi / spectrum.hz_per_bin) as usize + 1)
+                .clamp(first + 1, spectrum.dbfs.len().max(1)))
+            .min(spectrum.dbfs.len());
+            let value = spectrum
+                .dbfs
+                .get(first..last.max(first + 1).min(spectrum.dbfs.len()))
+                .map(|b| b.iter().copied().fold(FLOOR_DBFS, f32::max))
+                .unwrap_or(FLOOR_DBFS);
+            let _ = nyquist;
+            (center, value)
+        })
+        .collect()
+}
+
 /// ISO 266-style 1/3-octave center frequencies (1000 * 2^(k/3)) from
 /// MIN_GRID_HZ up to `nyquist_hz`, used as the spectrum grid.
 pub fn third_octave_centers(nyquist_hz: f32) -> Vec<f32> {
@@ -151,6 +176,20 @@ mod tests {
         assert!(analyze_at(&path, Settings { fft_size: 1000 }, 0.0, || false).is_err());
         // Cancellation works.
         assert!(analyze_at(&path, Settings { fft_size: 1024 }, 0.0, || true).is_err());
+    }
+
+    #[test]
+    fn third_octave_bands_peak_at_the_tone_frequency() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.wav");
+        tone(&path, 1000.0, 1);
+        let s = analyze_at(&path, Settings { fft_size: 2048 }, 0.0, || false).unwrap();
+        let bands = third_octave_bands(&s);
+        assert!(!bands.is_empty());
+        let (center, db) = bands.iter().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+        // 1 kHz tone peaks in the 1 kHz 1/3-octave band at about -6 dBFS.
+        assert!((center - 1000.0).abs() < 60.0, "{center}");
+        assert!((db + 6.0206).abs() < 0.1, "{db}");
     }
 
     #[test]

@@ -62,10 +62,10 @@ pub struct App {
     spectrum_on: bool,
     #[cfg(feature = "spectrogram")]
     spectrum_height: f32,
-    /// Annotation column width; the vertical split bar between the
-    /// annotation and spectrum columns redistributes it.
+    /// Annotation column width as a fraction of the bottom area; the vertical
+    /// split bar between the annotation and spectrum columns redistributes it.
     #[cfg(feature = "spectrogram")]
-    annotation_width: f32,
+    annotation_fraction: f32,
     #[cfg(feature = "spectrogram")]
     spectrum: Option<(f64, frx_core::spectrum::Spectrum)>,
     #[cfg(feature = "spectrogram")]
@@ -148,7 +148,7 @@ impl App {
             #[cfg(feature = "spectrogram")]
             spectrum_height: 0.0,
             #[cfg(feature = "spectrogram")]
-            annotation_width: 0.0,
+            annotation_fraction: 0.0,
             #[cfg(feature = "spectrogram")]
             spectrum: None,
             #[cfg(feature = "spectrogram")]
@@ -419,11 +419,16 @@ impl App {
                 AnalysisEvent::Metadata(id, result) if id == self.analysis_id => match result {
                     Ok(info) => {
                         // Annotations found on the file are rendered; new ones
-                        // stay floating (unsaved) until Ctrl+S / Save.
-                        self.saved_annotations = annotations::from_tags(&info.tags);
-                        self.annotations = self.saved_annotations.clone();
-                        self.annotations_dirty = false;
-                        self.annotation_text = annotations::format_annotations(&self.annotations);
+                        // stay floating (unsaved) until Ctrl+S / Save. Never
+                        // clobber floating edits when metadata arrives late.
+                        let stored = annotations::from_tags(&info.tags);
+                        self.saved_annotations = stored.clone();
+                        if !self.annotations_dirty {
+                            self.annotations = stored;
+                            self.annotation_text =
+                                annotations::format_annotations(&self.annotations);
+                        }
+                        self.annotations_dirty = self.annotations != self.saved_annotations;
                         self.info = Some(info);
                     }
                     Err(error) => {
@@ -557,7 +562,7 @@ impl App {
     /// Merge annotations (from the text field or a right-click) into the
     /// current floating list; idempotent. Nothing is written to disk until
     /// the user saves (Ctrl+S / File menu) — writes go through save dialog.
-    fn add_annotations(&mut self, new: Vec<Annotation>) {
+    fn add_annotations(&mut self, new: Vec<Annotation>, sync_field: bool) {
         if new.is_empty() || self.browser.selected.is_none() {
             return;
         }
@@ -565,13 +570,33 @@ impl App {
         annotations::merge(&mut self.annotations, &new);
         if self.annotations != before {
             self.annotations_dirty = self.annotations != self.saved_annotations;
-            self.annotation_text = annotations::format_annotations(&self.annotations);
+            if sync_field {
+                // Right-click markers render into the text field too (idempotent).
+                let mut text = self.annotation_text.clone();
+                for line in annotations::format_annotations(&new).lines() {
+                    if !text.lines().any(|l| l == line) {
+                        if !text.is_empty() {
+                            text.push('\n');
+                        }
+                        text.push_str(line);
+                    }
+                }
+                self.annotation_text = text;
+            }
             crate::logln!(
                 "annotation added (floating, {} unsaved change(s))",
                 self.annotations
                     .len()
                     .saturating_sub(self.saved_annotations.len())
             );
+        }
+    }
+    /// Automatic parsing: every complete [dd:hh:mm:ss] marker in the text
+    /// field immediately becomes a floating annotation (idempotent). The
+    /// field itself is never rewritten while typing.
+    fn sync_annotations_from_text(&mut self) {
+        if let Ok(parsed) = annotations::parse_text(&self.annotation_text) {
+            self.add_annotations(parsed, false);
         }
     }
     /// Open the standard save dialog (file naming + native overwrite warning)
@@ -615,9 +640,10 @@ impl App {
         }
     }
     /// Bottom text field: "[dd:hh:mm:ss] note" entries become annotations.
+    #[cfg(test)]
     fn submit_annotation_text(&mut self) {
         match annotations::parse_text(&self.annotation_text) {
-            Ok(new) => self.add_annotations(new),
+            Ok(new) => self.add_annotations(new, false),
             Err(error) => self.error = Some(format!("{error:#}")),
         }
     }
@@ -770,10 +796,13 @@ impl App {
             && let Some(f) = fraction()
             && let Some(seconds) = self.window().fraction_to_time(f)
         {
-            self.add_annotations(vec![Annotation {
-                seconds,
-                text: String::new(),
-            }]);
+            self.add_annotations(
+                vec![Annotation {
+                    seconds,
+                    text: String::new(),
+                }],
+                true,
+            );
             return;
         }
         if (response.clicked()

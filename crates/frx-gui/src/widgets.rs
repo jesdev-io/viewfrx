@@ -337,20 +337,19 @@ pub fn waveform_channel_view(
             (first, last)
         };
         let visible = &peaks[first..last];
-        let columns = (rect.width().ceil() as usize).max(1).min(visible.len());
         let normalized = waveform.normalization().map_or(1.0, |n| n.gain);
         // Two passes guarantee the original is in front, never painted over by
         // the quieter normalization preview. Both are source-relative, not live gain.
+        // X positions map each bin's center time through the shared zoom
+        // window, so waveform content, playhead and annotation lines align.
         for (gain, color) in [(normalized, theme::NORMALIZED_WAVE), (1.0, theme::AMBER)] {
-            for column in 0..columns {
-                let start = column * visible.len() / columns;
-                let end = ((column + 1) * visible.len() / columns).max(start + 1);
-                let (min, max) = visible[start..end]
-                    .iter()
-                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), p| {
-                        (min.min(p.min - dc), max.max(p.max - dc))
-                    });
-                let x = rect.left() + (column as f32 + 0.5) / columns as f32 * rect.width();
+            for (i, p) in visible.iter().enumerate() {
+                let center_time = (first + i) as f64 * bin_seconds + bin_seconds / 2.0;
+                if center_time < window.start || center_time > window.end {
+                    continue;
+                }
+                let x = rect.left() + window.time_to_fraction(center_time) * rect.width();
+                let (min, max) = (p.min - dc, p.max - dc);
                 let scale = rect.height() * l::WAVE_SCALE;
                 painter.line_segment(
                     [
@@ -595,6 +594,80 @@ mod tests {
         let right = (total - left).max(260.0);
         assert_eq!(right, 260.0);
         assert_eq!(left + right, total);
+    }
+
+    #[test]
+    fn annotation_lines_align_with_the_zoom_window() {
+        use frx_core::waveform::{Peak, Waveform};
+        let ctx = egui::Context::default();
+        let wave = Waveform {
+            sample_rate: 8000,
+            frames: 8000,
+            frames_per_bin: 1000,
+            peaks: vec![
+                Peak {
+                    min: -0.5,
+                    max: 0.5
+                };
+                8
+            ],
+            channel_peaks: vec![vec![
+                Peak {
+                    min: -0.5,
+                    max: 0.5
+                };
+                8
+            ]],
+            dc_offset: vec![0.0],
+        };
+        let window = TimeWindow {
+            start: 2.0,
+            end: 6.0,
+        };
+        let annotation = || Annotation {
+            seconds: 4.0,
+            text: "x".into(),
+        };
+        let mut rect = egui::Rect::NOTHING;
+        let output = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                rect = waveform_channel_view(
+                    ui,
+                    Some(&wave),
+                    4.0,
+                    window,
+                    100.0,
+                    Some(0),
+                    &[annotation()],
+                )
+                .rect;
+            });
+        });
+        // t=4 s is the center of window [2,6]: the cyan marker line must sit at
+        // the plot's horizontal center (same mapping as the playhead).
+        let expected_x = rect.center().x;
+        let found = output.shapes.iter().any(|shape| {
+            if let egui::Shape::LineSegment { points, stroke } = &shape.shape {
+                stroke.color == theme::ANNOTATION
+                    && (points[0].x - expected_x).abs() < 0.5
+                    && (points[1].x - expected_x).abs() < 0.5
+            } else {
+                false
+            }
+        });
+        assert!(
+            found,
+            "annotation line must be at x={expected_x} in {rect:?}"
+        );
+        // And the playhead (purple) at the same position t=4 s.
+        let playhead = output.shapes.iter().any(|shape| {
+            if let egui::Shape::LineSegment { points, stroke } = &shape.shape {
+                stroke.color == theme::PURPLE && (points[0].x - expected_x).abs() < 0.5
+            } else {
+                false
+            }
+        });
+        assert!(playhead, "playhead must align with the annotation line");
     }
 
     #[test]

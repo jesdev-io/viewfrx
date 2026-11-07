@@ -71,6 +71,7 @@ The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. 
 ./target/release/frxview annotate '/path/to/recording.wav' --output '/path/copy.wav' '[00:00:12:00] thunder'
 ./target/release/frxview annotations '/path/to/recording.wav'
 ./target/release/frxview spectrum '/path/to/recording.wav' --position 12.5
+./target/release/frxview spectrum '/path/to/recording.wav' --third-octave  # log-frequency 1/3-octave bands
 ./target/release/frxview waveform '/path/to/recording.wav' --from 10 --to 20
 ```
 

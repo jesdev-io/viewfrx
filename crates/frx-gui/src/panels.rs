@@ -828,44 +828,49 @@ impl App {
                         // Bottom area: two columns — annotations on the left,
                         // spectrum on the right — with a vertical resize bar
                         // between them.
+                        // The bottom area autofills down to the window bottom, so
+                        // no black gap remains below the annotation/spectrum row.
+                        let bottom_h =
+                            (content_bottom - ui.cursor().top() - l::SPACE_SMALL)
+                                .max(l::PLOT_HEIGHT_MIN);
                         #[cfg(feature = "spectrogram")]
                         if self.spectrum_on {
-                            let bottom_h =
-                                self.spectrum_height.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
-                            if self.annotation_width <= 0.0 {
-                                self.annotation_width = l::ANNOTATION_WIDTH_DEFAULT;
+                            if self.annotation_fraction <= 0.0 {
+                                self.annotation_fraction = l::ANNOTATION_FRACTION_DEFAULT;
                             }
                             ui.horizontal(|ui| {
                                 let total_w = ui.available_width();
-                                let max_ann = (total_w - l::SPECTRUM_MIN_WIDTH - l::WIDTH_HANDLE)
-                                    .max(l::ANNOTATION_WIDTH_MIN);
-                                let mut ann_w = self
-                                    .annotation_width
-                                    .clamp(l::ANNOTATION_WIDTH_MIN, max_ann);
-                                let mut spec_w = (total_w - ann_w - l::WIDTH_HANDLE)
-                                    .max(l::SPECTRUM_MIN_WIDTH);
+                                let splittable = (total_w - l::WIDTH_HANDLE).max(1.0);
+                                let frac = self
+                                    .annotation_fraction
+                                    .clamp(l::ANNOTATION_FRACTION_MIN, l::ANNOTATION_FRACTION_MAX);
+                                let mut ann_w = frac * splittable;
+                                let mut spec_w = splittable - ann_w;
                                 self.annotation_panel(ui, ann_w, bottom_h);
                                 widgets::vsplit_handle(
                                     ui,
                                     &mut ann_w,
                                     &mut spec_w,
-                                    l::ANNOTATION_WIDTH_MIN,
+                                    splittable * l::ANNOTATION_FRACTION_MIN,
                                     l::SPECTRUM_MIN_WIDTH,
                                     bottom_h,
                                 );
-                                self.annotation_width = ann_w;
-                                let spec_w = (total_w - ann_w - l::WIDTH_HANDLE)
-                                    .max(l::SPECTRUM_MIN_WIDTH);
+                                // Store a fraction, not pixels: the split stays
+                                // stable when the window/scrollbar width changes.
+                                self.annotation_fraction =
+                                    (ann_w / splittable).clamp(l::ANNOTATION_FRACTION_MIN, l::ANNOTATION_FRACTION_MAX);
+                                // The spectrum column takes the actual remaining width.
+                                let spec_w = ui.available_width().max(l::SPECTRUM_MIN_WIDTH);
                                 self.spectrum_panel(ui, spec_w, bottom_h);
                             });
                         } else {
                             let w = ui.available_width();
-                            self.annotation_panel(ui, w, l::ANNOTATION_ROW_DEFAULT);
+                            self.annotation_panel(ui, w, bottom_h);
                         }
                         #[cfg(not(feature = "spectrogram"))]
                         {
                             let w = ui.available_width();
-                            self.annotation_panel(ui, w, l::ANNOTATION_ROW_DEFAULT);
+                            self.annotation_panel(ui, w, bottom_h);
                         }
                     });
             });
@@ -885,13 +890,21 @@ impl App {
                         .size(l::MICRO_FONT)
                         .color(theme::ANNOTATION),
                 );
+                // Multiline: each [dd:hh:mm:ss] timestamp gets its own text row,
+                // and newlines render as real line breaks (no replacement glyph).
+                let rows = ((height - 2.0 * l::CARD_PADDING as f32 - 16.0) / 18.0)
+                    .max(1.0) as usize;
                 let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.annotation_text)
-                        .hint_text("[dd:hh:mm:ss] free text — Enter adds a floating marker (Ctrl+S saves)")
-                        .desired_width(f32::INFINITY),
+                    egui::TextEdit::multiline(&mut self.annotation_text)
+                        .hint_text("[dd:hh:mm:ss] note per row — markers appear instantly, Ctrl+S saves")
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(rows),
                 );
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    self.submit_annotation_text();
+                // Automatic: every complete marker in the text becomes a
+                // floating annotation immediately (idempotent), without
+                // rewriting the field while typing.
+                if response.changed() {
+                    self.sync_annotations_from_text();
                 }
                 response.on_hover_text(format!(
                     "{} marker(s) on this file ({}). Right-click a plot to mark the playhead position.",

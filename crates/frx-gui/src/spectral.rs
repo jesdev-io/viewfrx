@@ -196,17 +196,14 @@ impl View {
         } else {
             &self.right
         } {
-            // Zoom window: show only the columns whose centers fall inside
-            // [start, end], stretched across the full plot width.
+            // Zoom window: map the source-time window exactly onto the
+            // texture's column axis (column k is centered at k*hop), so the
+            // spectrogram, playhead and annotation lines all align.
             let columns = texture.size()[0].max(1) as f64;
             let col_seconds = self.column_seconds.max(1e-12);
-            let start_col = ((window.start / col_seconds) as usize).min(texture.size()[0] - 1);
-            let end_col =
-                ((window.end / col_seconds) as usize + 1).clamp(start_col + 1, texture.size()[0]);
-            let uv = egui::Rect::from_min_max(
-                pos2(start_col as f32 / columns as f32, 0.0),
-                pos2(end_col as f32 / columns as f32, 1.0),
-            );
+            let u0 = (window.start / col_seconds / columns).clamp(0.0, 1.0);
+            let u1 = (window.end / col_seconds / columns).clamp(u0 + 1e-6, 1.0);
+            let uv = egui::Rect::from_min_max(pos2(u0 as f32, 0.0), pos2(u1 as f32, 1.0));
             painter.image(texture.id(), rect, uv, Color32::WHITE);
             painter.text(
                 rect.left_top() + vec2(l::SPACE_SMALL, l::SPACE_SMALL),
