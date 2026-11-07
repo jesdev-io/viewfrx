@@ -127,3 +127,71 @@ fn spectral_worker_delivers_color_image_after_waveform() {
         }
     }
 }
+
+#[test]
+fn refresh_keeps_the_in_use_device_listed() {
+    let previous = vec![
+        DeviceInfo {
+            index: 0,
+            name: "HDMI".into(),
+            default_config: Some("48 kHz".into()),
+        },
+        DeviceInfo {
+            index: 1,
+            name: "USB DAC".into(),
+            default_config: None,
+        },
+    ];
+    // Fresh enumeration lost index 1, but the engine still uses it.
+    let fresh = vec![DeviceInfo {
+        index: 0,
+        name: "HDMI".into(),
+        default_config: None,
+    }];
+    let merged = keep_active_device(fresh, Some(1), &previous);
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[1].index, 1);
+    assert_eq!(merged[1].name, "USB DAC");
+    // No active device or still-listed device: unchanged.
+    let fresh2 = vec![DeviceInfo {
+        index: 0,
+        name: "HDMI".into(),
+        default_config: None,
+    }];
+    assert_eq!(keep_active_device(fresh2.clone(), None, &previous).len(), 1);
+    assert_eq!(keep_active_device(fresh2, Some(0), &previous).len(), 1);
+}
+
+#[cfg(feature = "spectrogram")]
+#[test]
+fn spectrum_requests_do_not_starve_full_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tone.mp3");
+    std::fs::write(
+        &path,
+        include_bytes!("../../frx-core/tests/fixtures/tone.mp3"),
+    )
+    .unwrap();
+    let service = AnalysisService::start(egui::Context::default(), dir.path().join("cache"));
+    let full_id = service.request(path.clone());
+    // Live spectrum requests queued right after must not replace the full job.
+    let _ = service.request_spectrum(path.clone(), 512, 0.0);
+    let _ = service.request_spectrum(path.clone(), 512, 0.1);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut metadata = false;
+    while Instant::now() < deadline {
+        match service.rx.recv_timeout(Duration::from_secs(3)).unwrap() {
+            AnalysisEvent::Metadata(id, result) if id == full_id => {
+                result.unwrap();
+                metadata = true;
+            }
+            AnalysisEvent::Waveform(id, result) if id == full_id => {
+                assert!(metadata, "metadata must arrive before the waveform");
+                result.unwrap();
+                return; // preview loaded despite spectrum traffic: no regression
+            }
+            _ => {}
+        }
+    }
+    panic!("full analysis was starved by spectrum requests");
+}

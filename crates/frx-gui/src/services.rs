@@ -71,6 +71,9 @@ impl AudioService {
             let mut engine = None;
             let mut state = AudioSnapshot::default();
             let mut desired_device = Some(None);
+            // Index of the device the open engine actually uses, so a refresh
+            // never drops it from the list while it is still playing.
+            let mut active_device: Option<usize> = None;
             let mut gain = if muted { 0.0 } else { 1.0 };
             let mut rate = controls::RATE_DEFAULT;
             let mut refresh = true;
@@ -110,6 +113,7 @@ impl AudioService {
                     match Engine::open(index) {
                         Ok(new) => {
                             logln!("audio engine opened (device {:?})", index);
+                            active_device = index;
                             let _ = new.execute(Command::Gain { value: gain });
                             let _ = new.execute(Command::Rate { value: rate });
                             engine = Some(new);
@@ -124,7 +128,10 @@ impl AudioService {
                 }
                 if refresh {
                     match frx_audio::devices() {
-                        Ok(devices) => state.devices = devices,
+                        Ok(devices) => {
+                            state.devices =
+                                keep_active_device(devices, active_device, &state.devices);
+                        }
                         Err(e) => state.error = Some(format!("Device discovery: {e:#}")),
                     }
                     refresh = false;
@@ -154,6 +161,30 @@ impl Drop for AudioService {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
     }
+}
+
+/// Keep the in-use device listed even if a fresh enumeration no longer
+/// reports it (the open engine still plays through it).
+fn keep_active_device(
+    mut devices: Vec<DeviceInfo>,
+    active: Option<usize>,
+    previous: &[DeviceInfo],
+) -> Vec<DeviceInfo> {
+    if let Some(index) = active
+        && !devices.iter().any(|d| d.index == index)
+    {
+        let name = previous
+            .iter()
+            .find(|d| d.index == index)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| format!("Output device {index} (in use)"));
+        devices.push(DeviceInfo {
+            index,
+            name,
+            default_config: None,
+        });
+    }
+    devices
 }
 
 #[derive(Debug)]
@@ -372,8 +403,17 @@ struct AnalysisJob {
     options: AnalysisOptions,
 }
 pub struct AnalysisService {
+    /// Full metadata/waveform/spectrogram analysis job slot.
     job: Arc<Mutex<Option<AnalysisJob>>>,
+    /// Separate slot for live spectrum requests, so they can never starve or
+    /// replace a pending full analysis (waveform previews must keep loading).
+    #[cfg(feature = "spectrogram")]
+    spectrum_job: Arc<Mutex<Option<AnalysisJob>>>,
     generation: Arc<AtomicU64>,
+    /// Spectrum requests get their own generation so they never cancel a
+    /// pending full analysis (and vice versa).
+    #[cfg(feature = "spectrogram")]
+    spectrum_generation: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
     pub rx: Receiver<AnalysisEvent>,
 }
@@ -381,8 +421,16 @@ impl AnalysisService {
     pub fn start(ctx: egui::Context, cache: PathBuf) -> Self {
         let job = Arc::new(Mutex::new(None::<AnalysisJob>));
         let jobs = job.clone();
+        #[cfg(feature = "spectrogram")]
+        let spectrum_slot = Arc::new(Mutex::new(None::<AnalysisJob>));
+        #[cfg(feature = "spectrogram")]
+        let spectrum_jobs = spectrum_slot.clone();
         let generation = Arc::new(AtomicU64::new(0));
         let version = generation.clone();
+        #[cfg(feature = "spectrogram")]
+        let spectrum_version = Arc::new(AtomicU64::new(0));
+        #[cfg(feature = "spectrogram")]
+        let spectrum_clock = spectrum_version.clone();
         let shutdown = Arc::new(AtomicBool::new(false));
         let stop = shutdown.clone();
         let (tx, rx) = mpsc::sync_channel(ANALYSIS_QUEUE);
@@ -392,15 +440,31 @@ impl AnalysisService {
                 frx_core::spectrogram::SpectrogramCache::new(cache.join("spectrograms"));
             let cache = WaveformCache::new(cache);
             while !stop.load(Ordering::Acquire) {
+                // Full analysis always wins: a pending full job is never
+                // replaced, spectrum requests wait in their own slot.
                 let next = jobs.lock().unwrap().take();
+                #[cfg(feature = "spectrogram")]
+                let next = next.or_else(|| spectrum_jobs.lock().unwrap().take());
                 let Some(job) = next else {
                     thread::sleep(Duration::from_millis(POLL_MS));
                     continue;
                 };
                 let id = job.id;
                 let path = job.path;
-                let cancelled =
-                    || stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != id;
+                #[cfg(feature = "spectrogram")]
+                let is_spectrum = matches!(job.kind, AnalysisJobKind::Spectrum { .. });
+                let cancelled = || {
+                    if stop.load(Ordering::Acquire) {
+                        return true;
+                    }
+                    // Spectrum requests use their own generation clock and can
+                    // never cancel a pending full analysis (and vice versa).
+                    #[cfg(feature = "spectrogram")]
+                    if is_spectrum {
+                        return spectrum_clock.load(Ordering::Acquire) != id;
+                    }
+                    version.load(Ordering::Acquire) != id
+                };
                 #[cfg(feature = "spectrogram")]
                 if let AnalysisJobKind::Spectrum { fft_size, position } = job.kind {
                     let result = frx_core::spectrum::analyze_at(
@@ -466,7 +530,11 @@ impl AnalysisService {
         });
         Self {
             job,
+            #[cfg(feature = "spectrogram")]
+            spectrum_job: spectrum_slot,
             generation,
+            #[cfg(feature = "spectrogram")]
+            spectrum_generation: spectrum_version,
             shutdown,
             rx,
         }
@@ -487,11 +555,12 @@ impl AnalysisService {
         });
         id
     }
-    /// Live spectrum at a playhead position; replaces any queued analysis.
+    /// Live spectrum at a playhead position; goes to its own slot and never
+    /// replaces a pending full analysis job.
     #[cfg(feature = "spectrogram")]
     pub fn request_spectrum(&self, path: PathBuf, fft_size: usize, position: f64) -> u64 {
-        let id = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-        *self.job.lock().unwrap() = Some(AnalysisJob {
+        let id = self.spectrum_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        *self.spectrum_job.lock().unwrap() = Some(AnalysisJob {
             id,
             path,
             kind: AnalysisJobKind::Spectrum { fft_size, position },
