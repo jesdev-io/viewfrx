@@ -10,7 +10,27 @@
 use crate::decode::AudioReader;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Write, path::Path};
+use std::{fs, io::Write, path::Path, thread, time::Duration};
+
+/// Atomic persist with a short retry on transient locks (Windows AV/indexer
+/// or a just-closed reader handle can briefly deny the rename).
+fn persist_with_retry(mut temp: tempfile::NamedTempFile, path: &Path) -> Result<()> {
+    let mut attempt = 0;
+    loop {
+        match temp.persist(path) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                temp = e.file;
+                if e.error.kind() == std::io::ErrorKind::PermissionDenied && attempt < 20 {
+                    attempt += 1;
+                    thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+                return Err(e.error.into());
+            }
+        }
+    }
+}
 
 /// Custom RIFF INFO sub-chunk fourcc for viewfrx annotations.
 pub const WAV_ANNOTATION_CHUNK: &[u8; 4] = b"FRXA";
@@ -180,7 +200,7 @@ pub fn write(path: &Path, annotations: &[Annotation]) -> Result<()> {
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     temp.write_all(&updated)?;
     temp.flush()?;
-    temp.persist(path).map_err(|e| e.error)?;
+    persist_with_retry(temp, path)?;
     Ok(())
 }
 
@@ -220,7 +240,7 @@ pub fn save_as(src: &Path, dst: &Path, annotations: &[Annotation]) -> Result<()>
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     temp.write_all(&updated)?;
     temp.flush()?;
-    temp.persist(dst).map_err(|e| e.error)?;
+    persist_with_retry(temp, dst)?;
     Ok(())
 }
 
@@ -638,6 +658,7 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 800);
+        drop(reader); // release the handle before re-annotating (Windows denies rename)
         // Audio data untouched: original file's data chunk is still there verbatim.
         let now = fs::read(&path)?;
         assert!(now.len() > original.len());
@@ -754,6 +775,7 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 11025);
+        drop(reader);
         Ok(())
     }
 
@@ -875,6 +897,7 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 11025);
+        drop(reader);
         Ok(())
     }
 
