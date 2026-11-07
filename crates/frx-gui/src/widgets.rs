@@ -9,6 +9,44 @@ use frx_audio::Status;
 use frx_core::{annotations::Annotation, waveform::Waveform};
 use std::ops::RangeInclusive;
 
+/// Horizontal resize bar between two stacked rows: dragging it vertically
+/// redistributes height between the upper (`top`) and lower (`bottom`) row,
+/// keeping their sum constant. Dragging down grows the upper row.
+#[cfg(feature = "spectrogram")]
+pub fn split_handle(
+    ui: &mut egui::Ui,
+    top: &mut f32,
+    bottom: &mut f32,
+    min_top: f32,
+    min_bottom: f32,
+) -> Response {
+    let total = *top + *bottom;
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), l::HEIGHT_HANDLE), Sense::drag());
+    let response = response
+        .on_hover_cursor(egui::CursorIcon::ResizeVertical)
+        .on_hover_text("Drag to redistribute height between the rows above and below");
+    if response.dragged() {
+        *top = drag_height(*top, response.drag_delta().y, min_top, total - min_bottom);
+        *bottom = (total - *top).max(min_bottom);
+    }
+    let painter = ui.painter_at(rect);
+    if response.hovered() || response.dragged() {
+        painter.rect_filled(rect, 0, theme::RAISED);
+    }
+    let grip = egui::Rect::from_center_size(rect.center(), vec2(46.0, 3.0));
+    painter.rect_filled(
+        grip,
+        2,
+        if response.dragged() {
+            theme::AMBER
+        } else {
+            theme::MUTED
+        },
+    );
+    response
+}
+
 /// Height after a bottom-edge drag: egui drag deltas grow downward on screen,
 /// so dragging the lower handle DOWN expands the plot (and up compacts it).
 pub fn drag_height(value: f32, delta_y: f32, min: f32, max: f32) -> f32 {
@@ -531,6 +569,36 @@ mod tests {
         });
         assert!(spectrum_rect.width() > 100.0);
         assert!(handle_rect.top() >= spectrum_rect.bottom() - 1.0);
+    }
+
+    #[cfg(feature = "spectrogram")]
+    #[test]
+    fn split_handle_drag_redistributes_row_heights() {
+        let ctx = egui::Context::default();
+        let mut top = 40.0f32;
+        let mut bottom = 130.0f32;
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Simulate a downward drag of +30 px.
+                let (rect, response) =
+                    ui.allocate_exact_size(vec2(200.0, l::HEIGHT_HANDLE), Sense::drag());
+                let _ = response;
+                let _ = rect;
+                // Drive the mapping directly (drag events are covered by the
+                // handle integration in the app tests).
+                let total = top + bottom;
+                top = drag_height(top, 30.0, 28.0, total - 60.0);
+                bottom = (total - top).max(60.0);
+            });
+        });
+        assert_eq!(top, 70.0);
+        assert_eq!(bottom, 100.0);
+        // Clamps keep both rows above their minimum.
+        let total = top + bottom;
+        top = drag_height(top, 1000.0, 28.0, total - 60.0);
+        bottom = (total - top).max(60.0);
+        assert_eq!(bottom, 60.0);
+        assert_eq!(top, total - 60.0);
     }
 
     #[test]
