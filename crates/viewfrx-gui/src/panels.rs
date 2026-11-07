@@ -25,129 +25,107 @@ impl App {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.image((self.logo.id(), vec2(l::HEADER_LOGO, l::HEADER_LOGO)));
-                    ui.label(RichText::new("viewfrx").size(l::BRAND_FONT).strong());
-                    ui.label(
-                        RichText::new("/  JESDEV")
-                            .color(theme::AMBER)
-                            .size(l::BRAND_SUBFONT),
-                    );
-                    ui.separator();
-                    // Classic top-bar menu exporting the main CLI-equivalent actions.
-                    ui.menu_button("File", |ui| {
-                        if ui.button("Import files…").clicked() {
-                            self.choose(false, ctx);
-                            ui.close();
-                        }
-                        if ui.button("Import folder…").clicked() {
-                            self.choose(true, ctx);
-                            ui.close();
-                        }
-                        if ui.button("Refresh").clicked() {
-                            self.rescan(Vec::new());
-                            ui.close();
-                        }
-                        if ui
-                            .add_enabled(
-                                self.annotations_dirty && self.browser.selected.is_some(),
-                                egui::Button::new("Save annotations (Ctrl+S)"),
-                            )
-                            .clicked()
-                        {
-                            self.request_save_dialog(ctx);
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui.button("Quit").clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                    });
-                    ui.menu_button("Playback", |ui| {
-                        if ui.button("Play / Pause (Space)").clicked() {
-                            self.toggle_play();
-                            ui.close();
-                        }
-                        if ui.button("Stop (Esc)").clicked() {
-                            self.stop();
-                            ui.close();
-                        }
-                        if ui.button("Previous file").clicked() {
-                            self.navigate(-1);
-                            ui.close();
-                        }
-                        if ui.button("Next file").clicked() {
-                            self.navigate(1);
-                            ui.close();
-                        }
-                        if ui.button("Seek −5 s").clicked() {
-                            self.seek((self.position() - r::KEY_SEEK_SECONDS).max(0.0));
-                            ui.close();
-                        }
-                        if ui.button("Seek +5 s").clicked() {
-                            self.seek((self.position() + r::KEY_SEEK_SECONDS).min(self.duration()));
-                            ui.close();
-                        }
-                    });
-                    ui.menu_button("View", |ui| {
-                        if ui
-                            .selectable_value(
+                    // Classic desktop menu bar (File / Playback / View) in the
+                    // space freed up on the left.
+                    egui::MenuBar::new().ui(ui, |ui| {
+                        ui.menu_button("File", |ui| {
+                            if ui.button("Import files…").clicked() {
+                                self.choose(false, ctx);
+                                ui.close();
+                            }
+                            if ui.button("Import folder…").clicked() {
+                                self.choose(true, ctx);
+                                ui.close();
+                            }
+                            if ui.button("Refresh").clicked() {
+                                self.rescan(Vec::new());
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    self.annotations_dirty && self.browser.selected.is_some(),
+                                    egui::Button::new("Save annotations (Ctrl+S)"),
+                                )
+                                .clicked()
+                            {
+                                self.request_save_dialog(ctx);
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("Quit").clicked() {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
+                        });
+                        ui.menu_button("Playback", |ui| {
+                            if ui.button("Play / Pause (Space)").clicked() {
+                                self.toggle_play();
+                                ui.close();
+                            }
+                            if ui.button("Stop (Esc)").clicked() {
+                                self.stop();
+                                ui.close();
+                            }
+                            if ui.button("Previous file").clicked() {
+                                self.navigate(-1);
+                                ui.close();
+                            }
+                            if ui.button("Next file").clicked() {
+                                self.navigate(1);
+                                ui.close();
+                            }
+                            if ui.button("Seek −5 s").clicked() {
+                                self.seek((self.position() - r::KEY_SEEK_SECONDS).max(0.0));
+                                ui.close();
+                            }
+                            if ui.button("Seek +5 s").clicked() {
+                                self.seek(
+                                    (self.position() + r::KEY_SEEK_SECONDS).min(self.duration()),
+                                );
+                                ui.close();
+                            }
+                        });
+                        ui.menu_button("View", |ui| {
+                            ui.selectable_value(
                                 &mut self.wave_channels,
                                 widgets::Channels::Both,
                                 "Waveform: Both",
-                            )
-                            .clicked()
-                        {
-                            ui.close();
-                        }
-                        if ui
-                            .selectable_value(
+                            );
+                            ui.selectable_value(
                                 &mut self.wave_channels,
                                 widgets::Channels::Left,
                                 "Waveform: Left",
-                            )
-                            .clicked()
-                        {
-                            ui.close();
-                        }
-                        if ui
-                            .selectable_value(
+                            );
+                            ui.selectable_value(
                                 &mut self.wave_channels,
                                 widgets::Channels::Right,
                                 "Waveform: Right",
-                            )
-                            .clicked()
-                        {
-                            ui.close();
-                        }
-                        #[cfg(feature = "spectrogram")]
-                        if ui
-                            .checkbox(&mut self.spectral.enabled, "Spectrogram")
-                            .clicked()
-                        {
-                            if let Some(path) = self.browser.selected.clone() {
-                                self.request_analysis(path);
+                            );
+                            #[cfg(feature = "spectrogram")]
+                            {
+                                ui.separator();
+                                ui.checkbox(&mut self.spectrum_on, "Spectrum");
+                                if ui
+                                    .checkbox(&mut self.spectral.enabled, "Spectrogram")
+                                    .clicked()
+                                    && let Some(path) = self.browser.selected.clone()
+                                {
+                                    self.request_analysis(path);
+                                }
                             }
-                            ui.close();
-                        }
-                    });
-                    ui.separator();
-                    ui.add_enabled_ui(self.picker.is_none(), |ui| {
-                        if ui.button("+ Files").clicked() {
-                            self.choose(false, ctx);
-                        }
-                        if ui.button("+ Folder").clicked() {
-                            self.choose(true, ctx);
-                        }
+                        });
                     });
                     if self.picker.is_some() {
                         ui.spinner();
                         ui.small("Waiting for file chooser");
                     }
+                    // Branding in the right upper corner.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.image((self.logo.id(), vec2(l::HEADER_LOGO, l::HEADER_LOGO)));
+                        ui.label(RichText::new("viewfrx").size(l::BRAND_FONT).strong());
                         ui.label(
-                            RichText::new("LOCAL AUDIO")
-                                .size(l::SMALL_FONT)
-                                .color(theme::MUTED),
+                            RichText::new("/  JESDEV")
+                                .color(theme::AMBER)
+                                .size(l::BRAND_SUBFONT),
                         );
                     });
                 });
