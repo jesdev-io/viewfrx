@@ -554,20 +554,27 @@ impl App {
         }
         #[cfg(feature = "spectrogram")]
         if self.spectrum_on && !self.analyzing {
-            // Never let live spectrum requests delay the initial
+            // The live spectrum holds the time block at the playhead. When the
+            // spectrogram is computed, reuse its column (shared STFT data and
+            // FFT settings — no re-decode); otherwise fall back to a single
+            // window analysis on the worker. Never let this delay the initial
             // metadata/waveform preview of a fresh selection.
-            let playing = self
-                .snapshot
-                .status
-                .as_ref()
-                .is_some_and(|s| s.state == "playing" && s.path == self.browser.selected);
-            if playing && let Some(path) = self.browser.selected.clone() {
-                let pos = self.position();
-                if (pos - self.last_spectrum_pos).abs() >= c::SPECTRUM_UPDATE_SECONDS {
-                    self.last_spectrum_pos = pos;
-                    self.spectrum_id =
-                        self.analysis
-                            .request_spectrum(path, self.spectral.fft_size(), pos);
+            let pos = self.position();
+            if (pos - self.last_spectrum_pos).abs() >= c::SPECTRUM_UPDATE_SECONDS {
+                self.last_spectrum_pos = pos;
+                if let Some(data) = self.spectral.data.clone() {
+                    self.spectrum =
+                        Some((pos, frx_core::spectrum::Spectrum::from_column(&data, pos)));
+                } else if let Some(path) = self.browser.selected.clone() {
+                    let playing =
+                        self.snapshot.status.as_ref().is_some_and(|s| {
+                            s.state == "playing" && s.path == self.browser.selected
+                        });
+                    if playing {
+                        self.spectrum_id =
+                            self.analysis
+                                .request_spectrum(path, self.spectral.fft_size(), pos);
+                    }
                 }
             }
         }

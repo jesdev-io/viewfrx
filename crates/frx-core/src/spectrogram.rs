@@ -31,7 +31,7 @@ impl Settings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Spectrogram {
     pub sample_rate: u32,
     pub frames: u64,

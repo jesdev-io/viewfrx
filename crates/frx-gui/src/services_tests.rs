@@ -114,7 +114,9 @@ fn spectral_worker_delivers_color_image_after_waveform() {
             }
             AnalysisEvent::Spectrogram(generation, result) if generation == id => {
                 assert!(waveform);
-                let image = result.unwrap().unwrap();
+                let (data, rendered) = result.unwrap();
+                assert!(data.columns > 0);
+                let image = rendered.unwrap();
                 assert!(image.image.width() > 0);
                 assert_eq!(
                     image.image.height(),

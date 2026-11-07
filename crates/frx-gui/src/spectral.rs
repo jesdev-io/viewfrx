@@ -70,6 +70,8 @@ pub struct View {
     pub channels: widgets::Channels,
     nyquist_hz: f32,
     column_seconds: f64,
+    /// Raw spectrogram data; the live spectrum reuses its columns.
+    pub data: Option<Spectrogram>,
 }
 impl Default for View {
     fn default() -> Self {
@@ -83,6 +85,7 @@ impl Default for View {
             channels: Default::default(),
             nyquist_hz: 0.0,
             column_seconds: 0.0,
+            data: None,
         }
     }
 }
@@ -104,6 +107,7 @@ impl View {
     pub fn clear(&mut self) {
         self.texture = None;
         self.right = None;
+        self.data = None;
         self.pending = self.enabled;
     }
     pub fn controls(&mut self, ui: &mut egui::Ui) -> bool {
@@ -141,10 +145,11 @@ impl View {
     pub fn accept(
         &mut self,
         ctx: &egui::Context,
-        result: Result<Option<RenderedSpectrum>, String>,
+        result: Result<(Spectrogram, Option<RenderedSpectrum>), String>,
     ) -> Result<(), String> {
         self.pending = false;
-        let rendered = result?;
+        let (data, rendered) = result?;
+        self.data = Some(data);
         self.right = None;
         self.texture = rendered.map(|rendered| {
             self.right = rendered.right.map(|image| {

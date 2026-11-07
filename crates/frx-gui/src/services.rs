@@ -374,7 +374,13 @@ pub enum AnalysisEvent {
     #[cfg(feature = "spectrogram")]
     Spectrogram(
         u64,
-        Result<Option<crate::spectral::RenderedSpectrum>, String>,
+        Result<
+            (
+                frx_core::spectrogram::Spectrogram,
+                Option<crate::spectral::RenderedSpectrum>,
+            ),
+            String,
+        >,
     ),
     /// Live magnitude spectrum at a playhead position (u64 id, position seconds).
     #[cfg(feature = "spectrogram")]
@@ -498,6 +504,8 @@ impl AnalysisService {
                 }
                 #[cfg(feature = "spectrogram")]
                 if let Some(settings) = job.options.spectral {
+                    // The raw spectrogram is delivered too: the live spectrum
+                    // reuses its columns (shared STFT data + FFT settings).
                     let spectrum = (|| -> anyhow::Result<_> {
                         let cached = spectral_cache.get_channel(
                             &path,
@@ -505,7 +513,8 @@ impl AnalysisService {
                             Some(0),
                             cancelled,
                         )?;
-                        let mut rendered = crate::spectral::render(cached.spectrogram, settings);
+                        let data = cached.spectrogram;
+                        let mut rendered = crate::spectral::render(data.clone(), settings);
                         if stereo && let Some(left) = &mut rendered {
                             let cached = spectral_cache.get_channel(
                                 &path,
@@ -516,7 +525,7 @@ impl AnalysisService {
                             left.right = crate::spectral::render(cached.spectrogram, settings)
                                 .map(|r| r.image);
                         }
-                        Ok(rendered)
+                        Ok((data, rendered))
                     })()
                     .map_err(|e| format!("{e:#}"));
                     deliver(

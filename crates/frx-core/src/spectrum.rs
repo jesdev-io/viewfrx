@@ -4,7 +4,7 @@
 use crate::{
     config::{ANALYSIS_CANCEL_INTERVAL, spectral::*},
     decode::AudioReader,
-    spectrogram::{Settings, Transform},
+    spectrogram::{Settings, Spectrogram, Transform},
 };
 use anyhow::{Result, bail};
 use serde::Serialize;
@@ -70,6 +70,35 @@ pub fn third_octave_centers(nyquist_hz: f32) -> Vec<f32> {
         k += 1;
     }
     centers
+}
+
+impl Spectrum {
+    /// Build the spectrum for the time block at `position_seconds` from an
+    /// already-computed spectrogram column — spectrum and spectrogram share
+    /// the same STFT data and FFT settings, so no re-decode is needed.
+    pub fn from_column(spec: &Spectrogram, position_seconds: f64) -> Spectrum {
+        let col_seconds = spec.hop_size as f64 / spec.sample_rate.max(1) as f64;
+        let column = if col_seconds > 0.0 && spec.columns > 0 {
+            ((position_seconds / col_seconds) as usize).min(spec.columns - 1)
+        } else {
+            0
+        };
+        let bins = spec.frequency_bins;
+        let start = column * bins;
+        let end = (start + bins).min(spec.dbfs.len());
+        let dbfs = spec.dbfs.get(start..end).unwrap_or(&[]).to_vec();
+        let nyquist = spec.sample_rate as f32 / 2.0;
+        Spectrum {
+            sample_rate: spec.sample_rate,
+            position_seconds,
+            frames: spec.frames,
+            fft_size: spec.fft_size,
+            frequency_bins: bins,
+            hz_per_bin: nyquist / bins.max(1) as f32,
+            third_octave_hz: third_octave_centers(nyquist),
+            dbfs,
+        }
+    }
 }
 
 /// Magnitude spectrum of one Hann-windowed block starting at `position_seconds`
@@ -176,6 +205,39 @@ mod tests {
         assert!(analyze_at(&path, Settings { fft_size: 1000 }, 0.0, || false).is_err());
         // Cancellation works.
         assert!(analyze_at(&path, Settings { fft_size: 1024 }, 0.0, || true).is_err());
+    }
+
+    #[test]
+    fn spectrum_from_spectrogram_column_shares_data_and_calibration() {
+        use crate::spectrogram;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.wav");
+        tone(&path, 1024.0, 2);
+        let spec = spectrogram::analyze(&path, Settings { fft_size: 1024 }, || false).unwrap();
+        // The spectrum at a position equals the spectrogram column there.
+        let pos = 1.0;
+        let from_col = Spectrum::from_column(&spec, pos);
+        assert_eq!(from_col.fft_size, spec.fft_size);
+        assert_eq!(from_col.frequency_bins, spec.frequency_bins);
+        assert_eq!(from_col.sample_rate, spec.sample_rate);
+        // Same peak bin and level as a direct single-window analysis nearby.
+        let direct = analyze_at(&path, Settings { fft_size: 1024 }, pos, || false).unwrap();
+        let peak_col = from_col
+            .dbfs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        let peak_dir = direct
+            .dbfs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        assert_eq!(peak_col, peak_dir);
+        assert!((from_col.dbfs[peak_col] - direct.dbfs[peak_dir]).abs() < 0.5);
     }
 
     #[test]
