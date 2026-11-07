@@ -1,12 +1,22 @@
 # viewfrx
 
+[![CI](https://github.com/jesdev-io/viewfrx/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jesdev-io/viewfrx/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/jesdev-io/viewfrx)](https://github.com/jesdev-io/viewfrx/releases/latest)
+
+[AI use policy](AI_POLICY.md)
+
+<p align="center">
+  <img src="crates/viewfrx-gui/assets/viewfrx-logo.png" alt="viewfrx logo" width="430">
+  <img src="crates/viewfrx-gui/assets/viewfrx-icon.png" alt="viewfrx app icon" width="112">
+</p>
+
 A compact, CLI-first Rust audio browser with a **native desktop GUI**.
 
-Browse local recordings in place, inspect metadata, audition WAV/MP3, seek, normalize peaks, change gain/rate, and generate cached waveform/spectrogram overviews. Source audio is never modified. Both interfaces use the same core and audio APIs.
+Browse local recordings in place, inspect metadata, audition WAV/MP3, seek, normalize peaks, change gain/rate, and generate cached waveform/spectrogram overviews. Playback and analysis do not modify audio; saving annotations updates only file metadata. Both interfaces use the same core and audio APIs.
 
 ## Build
 
-Rust 1.89+ is declared by the dependency graph; **locally verified with Rust 1.95 on Linux**. Windows/macOS support is intended through CPAL, but not yet built or runtime-tested.
+Rust 1.89+ is declared. GitHub Actions builds and tests on Linux, Windows, and macOS; device/driver behavior can still vary by platform.
 
 ```sh
 # Debian/Ubuntu native build dependencies
@@ -38,7 +48,7 @@ cargo build --release --workspace --features spectrogram --locked
 - **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use the **File** menu (Import files/folder, Refresh), drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
 - **Center:** metadata cards (including the DC offset in dBFS), waveforms first (DC-removed, with a subdued −1 dBFS normalized overlay), then optional source spectrogram(s), click/drag seeking, right-click timestamp markers, symbol transport buttons (▶ play, ❚❚ pause, ■ stop, ⏮/⏭ browse), and a bottom area split into two columns — annotations on the left, the live spectrum on the right — with a vertical resize bar between them.
 - **Stereo views:** waveform and spectrogram each get a **Left / Right / Both** selector and are grouped as WAVE L, WAVE R, SPEC L, SPEC R (stereo recordings only).
-- **Resizable/zoomable plots:** drag a plot's bottom edge to resize it; zoom any subsection to full width with the −/+ buttons or the scroll wheel over a plot — all waveforms and spectrograms share the zoom window, and seeking/playhead/markers/time readout follow it. Double-click a plot rewinds and resets the zoom.
+- **Resizable/zoomable plots:** drag a plot's bottom edge to resize it; zoom with the −/+ buttons or the scroll wheel over a plot. Scroll zoom keeps the timestamp under the pointer at the same horizontal position; all waveforms and spectrograms share the zoom window, and seeking/playhead/markers/time readout follow it. Double-click a plot rewinds and resets the zoom.
 - **Live spectrum:** a toggleable magnitude-spectrum column at the bottom right of the center area (log-frequency 1/3-octave grid, height-adaptive dB grid, highpass response curve when enabled), recomputed at the playhead while playing; the vertical bar between it and the annotation column redistributes their widths.
 - **Right:** output device, gain in dB, Normalize, pitch-changing rate, fixed highpass toggle, vertical stereo RMS/peak meters in dBFS, FFT size and spectral display floor, and a debug-console toggle.
 - **Top bar:** File / Playback / View menus export the main CLI-equivalent actions.
@@ -49,7 +59,7 @@ cargo build --release --workspace --features spectrogram --locked
 
 Sessions are stateless: opening files/folders replaces the current roots, Refresh rescans them, and nothing is restored on restart. Analysis caches are temporary by default. `--cache DIR` explicitly retains analysis artifacts for diagnostics; deprecated `--library` is ignored. Overlapping roots are deduplicated and displayed candidates are capped at 100,000, with an explicit warning. Device switches stop playback. Output failure does not prevent browsing or analysis. `--muted` starts at gain zero.
 
-On Linux the GUI uses egui/eframe with OpenGL and X11/Wayland runtime libraries; file dialogs use the desktop portal (`xdg-desktop-portal` plus a desktop-specific backend). It compiled here without additional GUI development headers. Drag-and-drop and startup paths remain alternatives if a desktop portal is unavailable. Windows/macOS native builds and dialogs remain unverified.
+On Linux the GUI uses egui/eframe with OpenGL and X11/Wayland runtime libraries; file dialogs use the desktop portal (`xdg-desktop-portal` plus a desktop-specific backend). Drag-and-drop and startup paths remain alternatives if a desktop portal is unavailable. Windows/macOS builds run in CI, but their runtime audio behavior and native dialogs have not yet been qualified.
 
 The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. Feature builds can show the spectrogram (off by default; enable via the settings toggle or `--spectrogram`). See [GUI design, tests and limitations](docs/gui.md) and [level/normalization/spectral conventions](docs/analysis.md).
 
@@ -142,7 +152,7 @@ See [architecture](docs/architecture.md), [references and branding](docs/referen
 
 ## CI and releases
 
-GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs fmt, clippy and the full test suite (both feature configurations) plus release builds on **Linux, Windows and macOS** on every push/PR to `main`/`dev`. Tagging `v*` (e.g. `git tag -a v0.1.0 && git push origin v0.1.0`) publishes a GitHub release with per-platform binary archives; the source code is attached by GitHub automatically. See [CHANGELOG.md](CHANGELOG.md). The `dev` branch is the integration branch; `main` is aimed at releases.
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs formatting, clippy, tests, and release builds on **Linux, Windows, and macOS** for pushes and pull requests to `main`/`dev`. A `v*` tag publishes portable binaries plus Linux `.deb`/AppImage, Windows MSI, and macOS DMG installers; GitHub also attaches source archives. Installer signing/notarization is not configured yet. See [CHANGELOG.md](CHANGELOG.md). The `dev` branch is the integration branch; `main` tracks releases.
 
 ## Test and measure
 
@@ -164,11 +174,11 @@ Unit/integration tests do not require an audio device. WAV fixtures are generate
 
 ## Current limitations
 
-- A separate magnitude-spectrum panel, waveform zoom and persisted preferences remain work. The meter has a 300 ms exponential RMS envelope and decaying sample peaks; it is VU-style, **not an IEC-calibrated VU instrument**. Annotation metadata writing supports WAV and MP3; other formats report a clear error and are left untouched.
+- Preferences are intentionally not persisted between sessions. The meter has a 300 ms exponential RMS envelope and decaying sample peaks; it is VU-style, **not an IEC-calibrated VU instrument**. Annotation metadata writing supports WAV and MP3; other formats report a clear error and are left untouched.
 - Spectrograms are bounded, linearly spaced frequency overviews with maximum aggregation, not a zoomable analysis editor or power spectral density measurement.
 - Playback supports mono/stereo; multichannel metadata/waveforms work, but auditioning >2 channels is rejected. Extra device channels are silent.
 - WAV and MP3 are tested. Other Symphonia-enabled formats may work but are not yet qualified. A truncated stream ending at a valid packet boundary may look like normal EOF; this is not an audio-file integrity checker.
 - Current-file read-ahead and a bounded overview cache exist. Next-file preloading and progressive multiresolution waveforms remain work.
 - GUI discovery/analysis run on separate workers with cooperative cancellation and stale-result rejection. OS file reads, directory enumeration/sorting and device opening cannot be interrupted; a newer request may wait for one already in progress, but not on the UI thread. CLI analysis remains an explicit job.
 - Cache identity uses path/size/mtime, not a full content hash. If files change while preserving both size and mtime, delete their cached analyses.
-- Cross-platform release packaging, dependency/security audits, and application licensing still need decisions. No remote is configured.
+- Tagged releases provide portable archives plus Linux `.deb`/AppImage, Windows MSI, and macOS DMG packages. Windows and macOS packages are currently unsigned; Linux runtime graphics, desktop portal, and audio-driver libraries remain host-provided. Dependency/security audits and application licensing remain open work.

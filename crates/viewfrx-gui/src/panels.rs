@@ -5,7 +5,7 @@ use crate::{
     services::AudioRequest,
     theme, widgets,
 };
-use eframe::egui::{self, RichText, vec2};
+use eframe::egui::{self, RichText};
 use viewfrx_audio::{
     Command,
     config::{MAX_RATE, MIN_RATE},
@@ -655,14 +655,14 @@ impl App {
                                         .on_hover_text("Zoom out (scroll wheel over a plot also zooms)")
                                         .clicked()
                                     {
-                                        self.zoom_at(center, c::ZOOM_FACTOR);
+                                        self.zoom_about_center(center, c::ZOOM_FACTOR);
                                     }
                                     if ui
                                         .small_button("+")
                                         .on_hover_text("Zoom in")
                                         .clicked()
                                     {
-                                        self.zoom_at(center, 1.0 / c::ZOOM_FACTOR);
+                                        self.zoom_about_center(center, 1.0 / c::ZOOM_FACTOR);
                                     }
                                     if self.zoom.is_some() {
                                         ui.small(

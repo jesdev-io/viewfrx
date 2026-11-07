@@ -803,7 +803,7 @@ impl App {
             .unwrap_or_else(|| TimeWindow::full(self.duration()))
             .clamped(self.duration())
     }
-    fn zoom_at(&mut self, center_fraction: f32, factor: f64) {
+    fn zoom_about_center(&mut self, center_fraction: f32, factor: f64) {
         let duration = self.duration();
         let window = self.window();
         self.zoom = if factor < 1.0 {
@@ -818,6 +818,19 @@ impl App {
         };
         crate::logln!(
             "zoom {:?} (window {:.3}–{:.3} s of {:.3})",
+            self.zoom.is_some(),
+            self.window().start,
+            self.window().end,
+            duration
+        );
+    }
+    fn zoom_at_pointer(&mut self, anchor_fraction: f32, factor: f64) {
+        let duration = self.duration();
+        self.zoom =
+            self.window()
+                .zoom_anchored(anchor_fraction, factor, c::ZOOM_MIN_SECONDS, duration);
+        crate::logln!(
+            "pointer zoom {:?} (window {:.3}–{:.3} s of {:.3})",
             self.zoom.is_some(),
             self.window().start,
             self.window().end,
@@ -850,7 +863,7 @@ impl App {
                 // view-relative window; wheel down zooms out.
                 let scale = (1.0 - c::ZOOM_WHEEL_STEP_PER_NOTCH * notches)
                     .clamp(c::ZOOM_WHEEL_MIN_FACTOR, c::ZOOM_WHEEL_MAX_FACTOR);
-                self.zoom_at(f, scale);
+                self.zoom_at_pointer(f, scale);
             }
         }
         // Right-click at a time position is the ONLY way to create a timestamp

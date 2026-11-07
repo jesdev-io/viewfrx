@@ -2,6 +2,12 @@
 
 All notable changes to viewfrx. Versions follow SemVer; releases are tagged `v*` and published by CI with per-platform binaries (Linux/Windows/macOS) plus source.
 
+## [0.1.3] - 2026-11-07
+
+- Keep the hovered timestamp fixed at the same screen position during scroll-wheel zoom; cap zoom expansion at file edges. Button zoom behavior is unchanged.
+- Replace the placeholder branding with the custom 15pt logo and gradient application/installer icon.
+- Refresh README release details, add CI/release badges and AI policy link.
+
 ## [0.1.2] - 2026-11-07
 
 - Add Linux `.deb`/AppImage, Windows MSI, and macOS DMG desktop packages to tagged releases (unsigned).
