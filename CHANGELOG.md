@@ -2,6 +2,11 @@
 
 All notable changes to viewfrx. Versions follow SemVer; releases are tagged `v*` and published by CI with per-platform binaries (Linux/Windows/macOS) plus source.
 
+## [0.1.1] - 2026-11-07
+
+- Publish per-platform downloadable binary archives with SHA-256 checksums; include README and license.
+- Document running release binaries without installing a Rust toolchain.
+
 ## [0.1.0] - first release
 
 CLI-first audio browser (WAV/MP3) with a native egui desktop GUI, sharing one core/audio stack.

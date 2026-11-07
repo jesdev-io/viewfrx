@@ -17,6 +17,15 @@ cargo build --release --locked
 
 The CLI binary is `target/release/viewfrx` (`viewfrx.exe` on Windows). Plain `cargo build`/`cargo run` still target the CLI only; build the whole workspace or select the GUI explicitly. Python and FFmpeg are optional test tools, not application runtime dependencies.
 
+## Install a release (no Rust/toolchain required)
+
+Download the archive for your operating system from the [Releases page](../../releases):
+
+- Linux/macOS: `viewfrx-<platform>.tar.gz`
+- Windows: `viewfrx-Windows.zip`
+
+Archives contain the `viewfrx` CLI, `viewfrx-gui` desktop app, this README, and the license. Extract the archive and run the binary directly (on Linux, the GUI requires system OpenGL/X11 or Wayland libraries and desktop portal support for file dialogs). Verify downloads with `SHA256SUMS` when available. Releases are built by GitHub Actions for Linux, Windows, and macOS; source archives are also attached automatically.
+
 ## Desktop app
 
 ```sh

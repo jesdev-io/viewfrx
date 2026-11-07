@@ -62,17 +62,32 @@ jobs:
           path: dist
           pattern: viewfrx-*
       - name: Package per-platform archives
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p release
           for d in dist/viewfrx-*/; do
-            os=$(basename "$d" | sed 's/viewfrx-//')
-            mkdir -p "release/viewfrx-$os"
-            cp "$d"/viewfrx "$d"/viewfrx.exe "$d"/viewfrx-gui "$d"/viewfrx-gui.exe "release/viewfrx-$os/" 2>/dev/null || true
-            tar -czf "release/viewfrx-$os.tar.gz" -C release "viewfrx-$os"
+            os=$(basename "$d" | sed 's/^viewfrx-//')
+            stage="release/viewfrx-$os"
+            mkdir -p "$stage"
+            for binary in viewfrx viewfrx.exe viewfrx-gui viewfrx-gui.exe; do
+              if [[ -f "$d/$binary" ]]; then cp "$d/$binary" "$stage/"; fi
+            done
+            cp README.md LICENSE "$stage/"
+            if [[ "$os" == "Windows" ]]; then
+              (cd release && 7z a -tzip "viewfrx-$os.zip" "viewfrx-$os" >/dev/null)
+            else
+              tar -czf "release/viewfrx-$os.tar.gz" -C release "viewfrx-$os"
+            fi
           done
-          ls -la release
+          cd release
+          sha256sum viewfrx-*.* > SHA256SUMS
+          ls -la
       - name: Publish GitHub release (binaries + source code)
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.tar.gz
+          files: |
+            release/*.tar.gz
+            release/*.zip
+            release/SHA256SUMS
           generate_release_notes: true
