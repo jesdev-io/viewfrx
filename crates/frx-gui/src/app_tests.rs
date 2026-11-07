@@ -384,7 +384,8 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
     assert!(app.annotations_dirty);
     app.save_annotations_to(path.clone());
     assert!(app.file_id > 0);
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    // Generous deadline: the full workspace suite runs test binaries in parallel.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while std::time::Instant::now() < deadline {
         app.poll(&ctx);
         if !app.annotations_dirty {
