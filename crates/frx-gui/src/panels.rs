@@ -669,7 +669,10 @@ impl App {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     // Tandem zoom buttons; all plots share the window.
-                                    let center = window.time_to_fraction(position);
+                                    // The +/- buttons zoom into the last play-start
+                                    // position (grey line), not the playhead.
+                                    let center = window
+                                        .time_to_fraction(self.last_play_start.unwrap_or(position));
                                     if ui
                                         .small_button("−")
                                         .on_hover_text("Zoom out (scroll wheel over a plot also zooms)")
@@ -710,7 +713,10 @@ impl App {
                                 window,
                                 wave_height / channels.len() as f32,
                                 Some(ch),
-                                &self.annotations,
+                                widgets::PlotOverlays {
+                                    annotations: &self.annotations,
+                                    play_start: self.last_play_start,
+                                },
                             );
                             self.handle_seek(response, ui);
                         }
@@ -734,7 +740,10 @@ impl App {
                                     window,
                                     spec_height / channels.len() as f32,
                                     ch,
-                                    &self.annotations,
+                                    widgets::PlotOverlays {
+                                        annotations: &self.annotations,
+                                        play_start: self.last_play_start,
+                                    },
                                 );
                                 self.handle_seek(response, ui);
                             }
@@ -905,6 +914,10 @@ impl App {
                 // rewriting the field while typing.
                 if response.changed() {
                     self.sync_annotations_from_text();
+                }
+                if self.focus_annotation_field {
+                    ui.memory_mut(|m| m.request_focus(response.id));
+                    self.focus_annotation_field = false;
                 }
                 response.on_hover_text(format!(
                     "{} marker(s) on this file ({}). Right-click a plot to mark the playhead position.",

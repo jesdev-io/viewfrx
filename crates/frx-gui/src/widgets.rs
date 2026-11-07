@@ -269,7 +269,10 @@ pub fn waveform_view(
         TimeWindow::full(duration),
         height,
         None,
-        &[],
+        PlotOverlays {
+            annotations: &[],
+            play_start: None,
+        },
     )
 }
 
@@ -289,6 +292,12 @@ pub fn annotation_lines(
     }
 }
 
+/// Per-plot overlay lines: annotation markers and the last play-start marker.
+pub struct PlotOverlays<'a> {
+    pub annotations: &'a [Annotation],
+    pub play_start: Option<f64>,
+}
+
 pub fn waveform_channel_view(
     ui: &mut egui::Ui,
     waveform: Option<&Waveform>,
@@ -296,7 +305,7 @@ pub fn waveform_channel_view(
     window: TimeWindow,
     height: f32,
     channel: Option<usize>,
-    annotations: &[Annotation],
+    overlays: PlotOverlays<'_>,
 ) -> Response {
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
@@ -369,9 +378,23 @@ pub fn waveform_channel_view(
             theme::MUTED,
         );
     }
-    annotation_lines(&painter, rect, annotations, window);
+    annotation_lines(&painter, rect, overlays.annotations, window);
+    if let Some(start) = overlays.play_start {
+        start_marker(&painter, rect, start, window);
+    }
     playhead(&painter, rect, position, window);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Grey vertical line at the position where playback was last started.
+pub fn start_marker(painter: &egui::Painter, rect: egui::Rect, seconds: f64, window: TimeWindow) {
+    if window.len() > 0.0 {
+        let x = rect.left() + window.time_to_fraction(seconds) * rect.width();
+        painter.line_segment(
+            [pos2(x, rect.top()), pos2(x, rect.bottom())],
+            Stroke::new(l::THIN_STROKE, theme::PLAY_START),
+        );
+    }
 }
 
 pub fn playhead(painter: &egui::Painter, rect: egui::Rect, position: f64, window: TimeWindow) {
@@ -638,7 +661,10 @@ mod tests {
                     window,
                     100.0,
                     Some(0),
-                    &[annotation()],
+                    PlotOverlays {
+                        annotations: &[annotation()],
+                        play_start: None,
+                    },
                 )
                 .rect;
             });

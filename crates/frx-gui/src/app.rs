@@ -55,6 +55,10 @@ pub struct App {
     debug_console: bool,
     /// Shared time-zoom window (None = full recording) for all plots.
     zoom: Option<TimeWindow>,
+    /// Where playback was last started (grey marker line in the plots).
+    last_play_start: Option<f64>,
+    /// Focus the annotation text field next frame (after a waveform click).
+    focus_annotation_field: bool,
     /// User-draggable plot heights (session-local, never persisted).
     wave_height: f32,
     spec_height: f32,
@@ -141,6 +145,8 @@ impl App {
             highpass: c::HIGHPASS_DEFAULT,
             debug_console: args.debug_console,
             zoom: None,
+            last_play_start: None,
+            focus_annotation_field: false,
             wave_height: 0.0,
             spec_height: 0.0,
             #[cfg(feature = "spectrogram")]
@@ -252,6 +258,7 @@ impl App {
             Command::Play { path }
         };
         self.pending_play = false;
+        self.last_play_start = Some(self.pending_seek.unwrap_or(0.0));
         self.send(command);
         true
     }
@@ -348,6 +355,7 @@ impl App {
         self.annotations.clear();
         self.annotation_text.clear();
         self.zoom = None;
+        self.last_play_start = None;
         #[cfg(feature = "spectrogram")]
         {
             self.spectrum = None;
@@ -772,9 +780,10 @@ impl App {
             self.zoom = None; // double-click also resets the zoom to the full view
             return;
         }
-        let fraction = || {
-            response
-                .interact_pointer_pos()
+        // latest_pos works for hover (scroll zoom) and clicks alike;
+        // interact_pointer_pos is None while no button is held.
+        let fraction = |ui: &egui::Ui| {
+            ui.input(|i| i.pointer.latest_pos())
                 .map(|p| (p.x - response.rect.left()) / response.rect.width())
                 .filter(|f| f.is_finite())
         };
@@ -782,18 +791,18 @@ impl App {
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y + i.raw_scroll_delta.y);
             if scroll > 0.0 {
-                if let Some(f) = fraction() {
+                if let Some(f) = fraction(ui) {
                     self.zoom_at(f, 1.0 / c::ZOOM_FACTOR);
                 }
             } else if scroll < 0.0
-                && let Some(f) = fraction()
+                && let Some(f) = fraction(ui)
             {
                 self.zoom_at(f, c::ZOOM_FACTOR);
             }
         }
         // Right-click at a time position creates a timestamp annotation there.
         if response.secondary_clicked()
-            && let Some(f) = fraction()
+            && let Some(f) = fraction(ui)
             && let Some(seconds) = self.window().fraction_to_time(f)
         {
             self.add_annotations(
@@ -809,10 +818,24 @@ impl App {
             || response.drag_stopped()
             || (response.dragged()
                 && self.seek_sent.elapsed() > Duration::from_millis(r::SEEK_THROTTLE_MS)))
-            && let Some(f) = fraction()
+            && let Some(f) = fraction(ui)
             && let Some(seconds) = self.window().fraction_to_time(f)
         {
             self.seek(seconds);
+            if response.clicked() {
+                // A plain click on a plot section drops a marker line there and
+                // preselects the annotation field with that timestamp, ready to
+                // type the note (the line and the field render each other).
+                self.add_annotations(
+                    vec![Annotation {
+                        seconds,
+                        text: String::new(),
+                    }],
+                    false,
+                );
+                self.annotation_text = annotations::format_annotations(&self.annotations);
+                self.focus_annotation_field = true;
+            }
         }
     }
     fn keyboard(&mut self, ctx: &egui::Context) {

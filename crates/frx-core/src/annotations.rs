@@ -118,9 +118,20 @@ pub fn merge(existing: &mut Vec<Annotation>, new: &[Annotation]) {
             seconds: annotation.seconds.round(),
             text: annotation.text.clone(),
         };
-        if !existing.contains(&canonical) {
-            existing.push(canonical);
+        if existing.contains(&canonical) {
+            continue;
         }
+        // Edit flow: a marker dropped by clicking (empty text) is replaced by
+        // the same timestamp once the user types the note text.
+        if !canonical.text.is_empty()
+            && let Some(pos) = existing
+                .iter()
+                .position(|a| a.seconds == canonical.seconds && a.text.is_empty())
+        {
+            existing[pos] = canonical;
+            continue;
+        }
+        existing.push(canonical);
     }
     existing.sort_by(|a, b| a.seconds.total_cmp(&b.seconds).then(a.text.cmp(&b.text)));
 }
@@ -485,6 +496,45 @@ mod tests {
         );
         assert!(parse_text("no marker here").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn merge_replaces_empty_marker_with_text_at_same_time() {
+        let mut existing = vec![Annotation {
+            seconds: 12.0,
+            text: String::new(),
+        }];
+        // Typing a note onto the clicked marker replaces the empty one.
+        merge(
+            &mut existing,
+            &[Annotation {
+                seconds: 12.0,
+                text: "thunder".into(),
+            }],
+        );
+        assert_eq!(
+            existing,
+            vec![Annotation {
+                seconds: 12.0,
+                text: "thunder".into()
+            }]
+        );
+        // Re-adding the same is idempotent; a different time adds a new marker.
+        merge(
+            &mut existing,
+            &[Annotation {
+                seconds: 12.0,
+                text: "thunder".into(),
+            }],
+        );
+        merge(
+            &mut existing,
+            &[Annotation {
+                seconds: 5.0,
+                text: String::new(),
+            }],
+        );
+        assert_eq!(existing.len(), 2);
     }
 
     #[test]

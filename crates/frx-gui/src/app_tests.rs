@@ -409,3 +409,162 @@ fn annotations_are_floating_until_saved_and_switching_warns() {
     assert!(app.error.is_some());
     assert_eq!(app.annotations.len(), 1);
 }
+
+#[test]
+fn scroll_wheel_over_waveform_zooms_around_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    app.browser.selected = Some(dir.path().join("a.wav"));
+    app.info = Some(AudioInfo {
+        sample_rate: 8000,
+        channels: 2,
+        frames: Some(80000),
+        duration_seconds: Some(10.0),
+        bits_per_sample: Some(16),
+        tags: vec![],
+    });
+    app.waveform = Some(Waveform {
+        sample_rate: 8000,
+        frames: 80000,
+        frames_per_bin: 10000,
+        peaks: vec![
+            frx_core::waveform::Peak {
+                min: -0.5,
+                max: 0.5
+            };
+            8
+        ],
+        channel_peaks: vec![
+            vec![
+                frx_core::waveform::Peak {
+                    min: -0.5,
+                    max: 0.5
+                };
+                8
+            ],
+            vec![
+                frx_core::waveform::Peak {
+                    min: -0.5,
+                    max: 0.5
+                };
+                8
+            ],
+        ],
+        dc_offset: vec![0.0, 0.0],
+    });
+    // Render once to learn the waveform rect, then scroll over its 3/4 point.
+    let mut rect = egui::Rect::NOTHING;
+    let _ = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            rect = waveform_view(ui, app.waveform.as_ref(), 0.0, 10.0, 120.0).rect;
+        });
+    });
+    let pos = pos2(rect.left() + rect.width() * 0.75, rect.center().y);
+    let input = egui::RawInput {
+        events: vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, 40.0),
+                modifiers: Default::default(),
+            },
+        ],
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let response = waveform_view(ui, app.waveform.as_ref(), 0.0, 10.0, 120.0);
+            app.handle_seek(response, ui);
+        });
+    });
+    let zoom = app.zoom.expect("scroll wheel must zoom in");
+    // Cursor at 75% of a 10 s file: zoom window centers near 7.5 s.
+    let center = (zoom.start + zoom.end) / 2.0;
+    assert!((center - 7.5).abs() < 0.5, "center {center}");
+    assert!(zoom.len() < 10.0);
+    // Scroll down zooms back out to the full view.
+    let input = egui::RawInput {
+        events: vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -400.0),
+                modifiers: Default::default(),
+            },
+        ],
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let response = waveform_view(ui, app.waveform.as_ref(), 0.0, 10.0, 120.0);
+            app.handle_seek(response, ui);
+        });
+    });
+    assert_eq!(app.zoom, None, "zooming out past full resets");
+}
+
+#[test]
+fn waveform_click_drops_marker_and_preselects_annotation_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    app.browser.selected = Some(dir.path().join("a.wav"));
+    app.info = Some(AudioInfo {
+        sample_rate: 8000,
+        channels: 2,
+        frames: Some(8000),
+        duration_seconds: Some(1.0),
+        bits_per_sample: Some(16),
+        tags: vec![],
+    });
+    let mut rect = egui::Rect::NOTHING;
+    let _ = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            rect = waveform_view(ui, None, 0.0, 1.0, 120.0).rect;
+        });
+    });
+    // Click at 3/4 of the 1 s plot.
+    let position = pos2(rect.left() + rect.width() * 0.75, rect.center().y);
+    for pressed in [true, false] {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                },
+            ],
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let response = waveform_view(ui, None, 0.0, 1.0, 120.0);
+                app.handle_seek(response, ui);
+            });
+        });
+    }
+    // A marker line appeared at the clicked time (rounded to whole seconds)...
+    assert!(app.annotations.contains(&Annotation {
+        seconds: 1.0,
+        text: String::new()
+    }));
+    // ...the field is preselected with that timestamp, ready to edit...
+    assert!(app.annotation_text.contains("[00:00:00:01]"));
+    assert!(app.focus_annotation_field);
+    assert!(app.annotations_dirty);
+    // ...and typing the note attaches it to that marker (no duplicate line).
+    app.focus_annotation_field = false;
+    app.annotation_text = format!("{} thunder", app.annotation_text.trim_end());
+    app.sync_annotations_from_text();
+    assert_eq!(
+        app.annotations,
+        vec![Annotation {
+            seconds: 1.0,
+            text: "thunder".into()
+        }]
+    );
+    assert!(!app.annotation_text.contains("\n\n"));
+}
