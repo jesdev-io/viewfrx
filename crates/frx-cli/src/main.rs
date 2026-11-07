@@ -77,6 +77,12 @@ enum Action {
         /// Return separate Left and Right overviews (stereo sources only).
         #[arg(long)]
         stereo: bool,
+        /// Zoom window start in seconds (0 = file start).
+        #[arg(long)]
+        from: Option<f64>,
+        /// Zoom window end in seconds (defaults to the file end).
+        #[arg(long)]
+        to: Option<f64>,
     },
     /// Calculate linked-channel peak normalization to -1 dBFS without changing audio.
     /// The gain targets the DC-removed sample peak; DC offset is not removed from the file.
@@ -106,6 +112,22 @@ enum Action {
         /// Return separate Left and Right analyses (stereo sources only).
         #[arg(long)]
         stereo: bool,
+        /// Zoom window start in seconds (0 = file start).
+        #[arg(long)]
+        from: Option<f64>,
+        /// Zoom window end in seconds (defaults to the file end).
+        #[arg(long)]
+        to: Option<f64>,
+    },
+    /// Single-window magnitude spectrum in dBFS at a position (live view source).
+    #[cfg(feature = "spectrogram")]
+    Spectrum {
+        path: PathBuf,
+        #[arg(long, default_value_t = frx_core::config::spectral::DEFAULT_FFT_SIZE)]
+        fft_size: usize,
+        /// Window start in seconds; clamped to the recording.
+        #[arg(long)]
+        position: Option<f64>,
     },
     /// Add timestamp annotations to a file's own metadata (WAV/MP3), without
     /// altering the audio. Idempotent: identical annotations are not duplicated.
@@ -234,22 +256,57 @@ fn run() -> Result<()> {
             cache,
             channel,
             stereo,
+            from,
+            to,
         } => {
             let cached = WaveformCache::new(cache_path(cache)).get(&path, bins)?;
             let waveform = &cached.waveform;
+            let window = match (from, to) {
+                (None, None) => None,
+                (from, to) => {
+                    let (from, to) = frx_core::waveform::validate_window(
+                        from.unwrap_or(0.0),
+                        to.unwrap_or(f64::INFINITY),
+                        waveform.duration_seconds(),
+                    )?;
+                    Some(serde_json::json!({"from": from, "to": to, "duration": waveform.duration_seconds()}))
+                }
+            };
+            let windowed = |w: &frx_core::waveform::Waveform| -> Result<frx_core::waveform::Waveform> {
+                match (from, to) {
+                    (None, None) => Ok(w.clone()),
+                    _ => w
+                        .windowed(from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
+                        .context("invalid zoom window"),
+                }
+            };
             if stereo {
                 if waveform.channels() != 2 {
                     bail!("--stereo requires a stereo recording");
                 }
                 let channels = (0..2)
-                    .map(|ch| waveform.channel_waveform(ch).context("missing channel"))
+                    .map(|ch| {
+                        Ok(match (from, to) {
+                            (None, None) => waveform.channel_waveform(ch).context("missing channel")?,
+                            _ => waveform
+                                .channel_windowed(ch, from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
+                                .with_context(|| format!("source channel {ch} does not exist"))?,
+                        })
+                    })
                     .collect::<Result<Vec<_>>>()?;
-                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "channels": channels}))?;
+                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "channels": channels}))?;
             } else if let Some(ch) = channel {
-                let view = waveform
-                    .channel_waveform(ch)
-                    .with_context(|| format!("source channel {ch} does not exist"))?;
-                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "waveform": view}))?;
+                let view = match (from, to) {
+                    (None, None) => waveform
+                        .channel_waveform(ch)
+                        .with_context(|| format!("source channel {ch} does not exist"))?,
+                    _ => waveform
+                        .channel_windowed(ch, from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
+                        .with_context(|| format!("source channel {ch} does not exist"))?,
+                };
+                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "waveform": view}))?;
+            } else if window.is_some() {
+                emit(&serde_json::json!({"cache_hit": cached.cache_hit, "window": window, "waveform": windowed(waveform)?}))?;
             } else {
                 emit(&cached)?;
             }
@@ -274,9 +331,27 @@ fn run() -> Result<()> {
             cache,
             channel,
             stereo,
+            from,
+            to,
         } => {
             use frx_core::spectrogram::{Settings, SpectrogramCache};
             let cache = SpectrogramCache::new(cache_path(cache));
+            let apply_window = |s: frx_core::spectrogram::Spectrogram,
+                                cache_hit: bool|
+             -> Result<()> {
+                match (from, to) {
+                    (None, None) => emit(&serde_json::json!({"cache_hit": cache_hit, "spectrogram": s})),
+                    _ => {
+                        let windowed = s
+                            .windowed(from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
+                            .context("invalid zoom window")?;
+                        let duration = windowed.duration_seconds();
+                        emit(&serde_json::json!({"cache_hit": cache_hit,
+                            "window": {"from": from.unwrap_or(0.0), "to": to.unwrap_or(duration), "duration": duration},
+                            "spectrogram": windowed}))
+                    }
+                }
+            };
             if stereo {
                 if inspect(&path)?.channels != 2 {
                     bail!("--stereo requires a stereo recording");
@@ -284,10 +359,38 @@ fn run() -> Result<()> {
                 let channels = (0..2)
                     .map(|ch| cache.get_channel(&path, Settings { fft_size }, Some(ch), || false))
                     .collect::<Result<Vec<_>>>()?;
-                emit(&channels)?;
+                let channels = channels
+                    .into_iter()
+                    .map(|c| -> Result<frx_core::spectrogram::Spectrogram> {
+                        match (from, to) {
+                            (None, None) => Ok(c.spectrogram),
+                            _ => c
+                                .spectrogram
+                                .windowed(from.unwrap_or(0.0), to.unwrap_or(f64::INFINITY))
+                                .context("invalid zoom window"),
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                emit(&serde_json::json!({"channels": channels}))?;
             } else {
-                emit(&cache.get_channel(&path, Settings { fft_size }, channel, || false)?)?;
+                let cached = cache.get_channel(&path, Settings { fft_size }, channel, || false)?;
+                apply_window(cached.spectrogram, cached.cache_hit)?;
             }
+        }
+        #[cfg(feature = "spectrogram")]
+        Action::Spectrum {
+            path,
+            fft_size,
+            position,
+        } => {
+            use frx_core::spectrum;
+            let settings = frx_core::spectrogram::Settings { fft_size };
+            emit(&spectrum::analyze_at(
+                &path,
+                settings,
+                position.unwrap_or(0.0),
+                || false,
+            )?)?;
         }
         Action::Annotate {
             path,

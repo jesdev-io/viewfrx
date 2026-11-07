@@ -237,7 +237,7 @@ fn spectrogram_cli_is_calibrated_cached_and_validates_fft_size() {
         dir.path(),
         &["spectrogram", "with spaces.WAV", "--stereo"],
     ));
-    assert_eq!(channels.as_array().unwrap().len(), 2);
+    assert_eq!(channels["channels"].as_array().unwrap().len(), 2);
     assert!(
         !run(
             dir.path(),
@@ -375,4 +375,76 @@ fn verbose_flag_pipes_console_log_lines_to_stderr() {
     let quiet = run(dir.path(), &["inspect", "with spaces.WAV"]);
     assert!(quiet.status.success());
     assert!(quiet.stderr.is_empty());
+}
+
+#[cfg(feature = "spectrogram")]
+#[test]
+fn spectrum_and_zoom_windows_match_analysis_conventions() {
+    let dir = tempfile::tempdir().unwrap();
+    // 1 kHz antiphase stereo sine, 8000 frames @ 8 kHz.
+    let mut w = hound::WavWriter::create(
+        dir.path().join("tone.WAV"),
+        hound::WavSpec {
+            channels: 2,
+            sample_rate: 8000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .unwrap();
+    for i in 0..8000 {
+        let v = (0.25 * (std::f32::consts::TAU * 1000.0 * i as f32 / 8000.0).sin() * 32767.0) as i16;
+        w.write_sample(v).unwrap();
+        w.write_sample(-v).unwrap();
+    }
+    w.finalize().unwrap();
+    let file = "tone.WAV";
+    // Magnitude spectrum at t=0.5 s: peak bin at 1 kHz, about -12 dBFS (0.25 amplitude).
+    let spec = success(run(
+        dir.path(),
+        &["spectrum", file, "--fft-size", "1024", "--position", "0.5"],
+    ));
+    assert_eq!(spec["position_seconds"], 0.5);
+    assert_eq!(spec["fft_size"], 1024);
+    let bins = spec["frequency_bins"].as_u64().unwrap() as usize;
+    let dbfs = spec["dbfs"].as_array().unwrap();
+    assert_eq!(dbfs.len(), bins);
+    let peak = dbfs
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.as_f64().unwrap().total_cmp(&b.1.as_f64().unwrap()))
+        .unwrap()
+        .0;
+    let hz = peak as f32 * spec["hz_per_bin"].as_f64().unwrap() as f32;
+    assert!((hz - 1000.0).abs() <= spec["hz_per_bin"].as_f64().unwrap() as f32, "{hz}");
+    let peak_db = dbfs[peak].as_f64().unwrap();
+    assert!((peak_db + 12.0412).abs() < 0.1, "{peak_db}");
+    assert!(run(dir.path(), &["spectrum", file, "--position", "-1"]).status.success() == false);
+    assert!(!run(dir.path(), &["spectrum", file, "--fft-size", "1000"]).status.success());
+    // Zoom window on the waveform: only bins inside [0.25, 0.75] s remain.
+    let full = success(run(dir.path(), &["waveform", file, "--bins", "8"]));
+    let zoomed = success(run(
+        dir.path(),
+        &["waveform", file, "--bins", "8", "--from", "0.25", "--to", "0.75"],
+    ));
+    assert_eq!(zoomed["window"]["from"], 0.25);
+    assert_eq!(zoomed["window"]["to"], 0.75);
+    assert_eq!(zoomed["window"]["duration"], 1.0);
+    let full_peaks = full["waveform"]["peaks"].as_array().unwrap().len();
+    let zoom_peaks = zoomed["waveform"]["peaks"].as_array().unwrap().len();
+    assert!(zoom_peaks < full_peaks, "{zoom_peaks} vs {full_peaks}");
+    assert!(zoom_peaks >= 1);
+    assert!(!run(dir.path(), &["waveform", file, "--from", "0.9", "--to", "0.1"]).status.success());
+    // Same window on the spectrogram slices columns.
+    let spec_zoom = success(run(
+        dir.path(),
+        &["spectrogram", file, "--fft-size", "512", "--from", "0.25", "--to", "0.5"],
+    ));
+    let cols = spec_zoom["spectrogram"]["columns"].as_u64().unwrap();
+    let bins2 = spec_zoom["spectrogram"]["frequency_bins"].as_u64().unwrap();
+    assert_eq!(
+        spec_zoom["spectrogram"]["dbfs"].as_array().unwrap().len() as u64,
+        cols * bins2
+    );
+    assert!(cols < 512);
 }

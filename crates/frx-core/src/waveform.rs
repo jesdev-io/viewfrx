@@ -17,7 +17,7 @@ pub struct Peak {
     pub max: f32,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Waveform {
     pub sample_rate: u32,
     pub frames: u64,
@@ -101,6 +101,43 @@ impl Waveform {
     }
 }
 
+impl Waveform {
+    pub fn duration_seconds(&self) -> f64 {
+        self.frames as f64 / self.sample_rate.max(1) as f64
+    }
+    /// Sub-window view: bins covering [from, to] seconds (clamped), used by
+    /// the CLI for the same time-zoom the GUI applies to all plots.
+    pub fn windowed(&self, from: f64, to: f64) -> Result<Waveform> {
+        let (from, to) = validate_window(from, to, self.duration_seconds())?;
+        let bin_seconds = self.frames_per_bin as f64 / self.sample_rate.max(1) as f64;
+        let slice = |peaks: &[Peak]| -> Vec<Peak> {
+            if peaks.is_empty() {
+                return Vec::new();
+            }
+            let start = ((from / bin_seconds) as usize).min(peaks.len() - 1);
+            let end = ((to / bin_seconds) as usize + 1).clamp(start + 1, peaks.len());
+            peaks[start..end].to_vec()
+        };
+        Ok(Waveform {
+            sample_rate: self.sample_rate,
+            frames: self.frames,
+            frames_per_bin: self.frames_per_bin,
+            peaks: slice(&self.peaks),
+            channel_peaks: self.channel_peaks.iter().map(|c| slice(c)).collect(),
+            dc_offset: self.dc_offset.clone(),
+        })
+    }
+}
+
+/// Validate and clamp a [from, to] seconds window against a duration.
+pub fn validate_window(from: f64, to: f64, duration: f64) -> Result<(f64, f64)> {
+    if !from.is_finite() || !to.is_finite() || from < 0.0 || to < from {
+        bail!("window must satisfy 0 <= from <= to and be finite");
+    }
+    let duration = if duration.is_finite() { duration } else { to };
+    Ok((from.min(duration), to.min(duration).max(from.min(duration))))
+}
+
 /// One channel's overview for `waveform --channel`/`--stereo` views.
 #[derive(Debug, Serialize)]
 pub struct ChannelWaveform {
@@ -126,6 +163,13 @@ impl Waveform {
             dc_offset: dc,
             dc_offset_dbfs: amplitude_dbfs(dc.abs()),
         })
+    }
+    /// Time-windowed channel view (`--channel` + `--from/--to`).
+    pub fn channel_windowed(&self, index: usize, from: f64, to: f64) -> Option<ChannelWaveform> {
+        let mut view = self.channel_waveform(index)?;
+        let windowed = self.windowed(from, to).ok()?;
+        view.peaks = windowed.channel_peaks.get(index)?.clone();
+        Some(view)
     }
 }
 

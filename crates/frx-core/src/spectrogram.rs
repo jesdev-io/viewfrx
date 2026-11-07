@@ -46,7 +46,43 @@ pub struct Spectrogram {
     pub dbfs: Vec<f32>,
 }
 
-struct Transform {
+impl Spectrogram {
+    pub fn duration_seconds(&self) -> f64 {
+        self.frames as f64 / self.sample_rate.max(1) as f64
+    }
+    /// Sub-window view: columns whose centers fall in [from, to] seconds.
+    /// Column k is centered at k * hop_size / sample_rate in the source.
+    pub fn windowed(&self, from: f64, to: f64) -> Result<Spectrogram> {
+        let (from, to) = crate::waveform::validate_window(from, to, self.duration_seconds())?;
+        let hop_seconds = self.hop_size as f64 / self.sample_rate.max(1) as f64;
+        let start = if self.columns == 0 {
+            0
+        } else {
+            ((from / hop_seconds) as usize).min(self.columns - 1)
+        };
+        let end = if self.columns == 0 {
+            0
+        } else {
+            ((to / hop_seconds) as usize + 1).clamp(start + 1, self.columns)
+        };
+        let bins = self.frequency_bins;
+        let dbfs = (start..end)
+            .flat_map(|c| self.dbfs[c * bins..(c + 1) * bins].iter().copied())
+            .collect();
+        Ok(Spectrogram {
+            sample_rate: self.sample_rate,
+            frames: self.frames,
+            fft_size: self.fft_size,
+            hop_size: self.hop_size,
+            windows_per_column: self.windows_per_column,
+            columns: end - start,
+            frequency_bins: bins,
+            dbfs,
+        })
+    }
+}
+
+pub(crate) struct Transform {
     fft: Arc<dyn Fft<f32>>,
     window: Vec<f32>,
     sum_window: f32,
@@ -55,7 +91,7 @@ struct Transform {
     powers: Vec<f32>,
 }
 impl Transform {
-    fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize) -> Self {
         let fft = FftPlanner::new().plan_fft_forward(size);
         let window: Vec<_> = (0..size)
             .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / size as f32).cos())
@@ -70,7 +106,7 @@ impl Transform {
             powers: vec![0.0; size / 2 + 1],
         }
     }
-    fn spectrum(&mut self, ring: &[Vec<f32>], start: usize) -> Result<Vec<f32>> {
+    pub(crate) fn spectrum(&mut self, ring: &[Vec<f32>], start: usize) -> Result<Vec<f32>> {
         let size = self.buffer.len();
         self.powers.fill(0.0);
         for channel in ring {
