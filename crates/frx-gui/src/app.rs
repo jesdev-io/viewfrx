@@ -61,6 +61,8 @@ pub struct App {
     #[cfg(feature = "spectrogram")]
     spectrum_on: bool,
     #[cfg(feature = "spectrogram")]
+    spectrum_height: f32,
+    #[cfg(feature = "spectrogram")]
     spectrum: Option<(f64, frx_core::spectrum::Spectrum)>,
     #[cfg(feature = "spectrogram")]
     spectrum_id: u64,
@@ -139,6 +141,8 @@ impl App {
             spec_height: 0.0,
             #[cfg(feature = "spectrogram")]
             spectrum_on: c::SPECTRUM_DEFAULT,
+            #[cfg(feature = "spectrogram")]
+            spectrum_height: 0.0,
             #[cfg(feature = "spectrogram")]
             spectrum: None,
             #[cfg(feature = "spectrogram")]
@@ -523,7 +527,9 @@ impl App {
             }
         }
         #[cfg(feature = "spectrogram")]
-        if self.spectrum_on {
+        if self.spectrum_on && !self.analyzing {
+            // Never let live spectrum requests delay the initial
+            // metadata/waveform preview of a fresh selection.
             let playing = self
                 .snapshot
                 .status

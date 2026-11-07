@@ -9,6 +9,12 @@ use frx_audio::Status;
 use frx_core::{annotations::Annotation, waveform::Waveform};
 use std::ops::RangeInclusive;
 
+/// Height after a bottom-edge drag: egui drag deltas grow downward on screen,
+/// so dragging the lower handle DOWN expands the plot (and up compacts it).
+pub fn drag_height(value: f32, delta_y: f32, min: f32, max: f32) -> f32 {
+    (value + delta_y).clamp(min, max)
+}
+
 /// Drag strip at a plot's bottom edge: dragging resizes the plot height
 /// within [min, max]. Returns true when the height changed.
 pub fn height_handle(ui: &mut egui::Ui, value: &mut f32, min: f32, max: f32) -> bool {
@@ -17,8 +23,7 @@ pub fn height_handle(ui: &mut egui::Ui, value: &mut f32, min: f32, max: f32) -> 
     let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
     let mut changed = false;
     if response.dragged() {
-        // Dragging the bottom edge downward grows the plot.
-        *value = (*value - response.drag_delta().y).clamp(min, max);
+        *value = drag_height(*value, response.drag_delta().y, min, max);
         changed = true;
     }
     ui.painter_at(rect).line_segment(
@@ -324,6 +329,9 @@ pub fn spectrum_view(
     spectrum: Option<&frx_core::spectrum::Spectrum>,
     floor_db: f32,
     height: f32,
+    // When the fixed highpass is enabled: (cutoff Hz, sample rate); its
+    // one-pole magnitude response is plotted over the spectrum.
+    highpass: Option<(f32, u32)>,
 ) -> Response {
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
@@ -335,6 +343,28 @@ pub fn spectrum_view(
                 * (rect.height() - 2.0 * l::SPACE_SMALL)
     };
     if let Some(spectrum) = spectrum {
+        // Highpass filter response |H(f)| for y = a*(y + x - x_prev), plotted in
+        // dB over the same linear frequency axis when the filter is enabled.
+        if let Some((cutoff_hz, sample_rate)) = highpass {
+            let fs = sample_rate.max(1) as f32;
+            let a = (-std::f32::consts::TAU * cutoff_hz / fs).exp();
+            let bins = spectrum.dbfs.len();
+            let mut previous = None;
+            for i in 0..bins {
+                let f = i as f32 * spectrum.hz_per_bin;
+                let w = std::f32::consts::TAU * f / fs;
+                let mag = a * (2.0 * (w / 2.0).sin()) / (1.0 - 2.0 * a * w.cos() + a * a).sqrt();
+                let db = 20.0 * mag.max(1e-9).log10();
+                let x = rect.left()
+                    + l::SPACE_SMALL
+                    + (i as f32 / (bins - 1).max(1) as f32) * (rect.width() - 2.0 * l::SPACE_SMALL);
+                let point = pos2(x, y(db));
+                if let Some(p) = previous {
+                    painter.line_segment([p, point], Stroke::new(l::THIN_STROKE, theme::PURPLE));
+                }
+                previous = Some(point);
+            }
+        }
         let bins = spectrum.dbfs.len();
         if bins > 1 {
             let mut previous = None;
@@ -379,12 +409,34 @@ pub fn spectrum_view(
             theme::MUTED,
         );
     }
-    response
+    if let Some((cutoff_hz, _)) = highpass {
+        painter.text(
+            rect.left_top() + vec2(l::SPACE_SMALL, l::SPACE_SMALL),
+            egui::Align2::LEFT_TOP,
+            format!("HPF {cutoff_hz:.0} Hz"),
+            egui::FontId::monospace(l::MICRO_FONT),
+            theme::PURPLE,
+        );
+    }
+    response.on_hover_text(if highpass.is_some() {
+        "Amber: magnitude spectrum at the playhead. Purple: fixed highpass filter response (enabled)."
+    } else {
+        "Magnitude spectrum at the playhead, dBFS."
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bottom_handle_drag_down_expands_and_drag_up_compacts() {
+        // Screen y grows downward: dragging the lower handle down (positive
+        // delta) must grow the plot, dragging up must shrink it.
+        assert_eq!(drag_height(100.0, 40.0, 60.0, 380.0), 140.0);
+        assert_eq!(drag_height(100.0, -40.0, 60.0, 380.0), 60.0);
+        assert_eq!(drag_height(370.0, 40.0, 60.0, 380.0), 380.0);
+    }
+
     #[test]
     fn double_click_slider_restores_default_and_marks_change() {
         let ctx = egui::Context::default();

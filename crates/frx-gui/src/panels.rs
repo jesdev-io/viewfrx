@@ -607,7 +607,12 @@ impl App {
                         let spectral_chrome = 0.0;
                         #[cfg(feature = "spectrogram")]
                         let spectrum_row = if self.spectrum_on {
-                            l::SPECTRUM_HEIGHT + 2.0 * l::SPACE_SMALL
+                            if self.spectrum_height <= 0.0 {
+                                self.spectrum_height = l::SPECTRUM_HEIGHT;
+                            }
+                            self.spectrum_height.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT)
+                                + l::HEIGHT_HANDLE
+                                + 2.0 * l::SPACE_SMALL
                         } else {
                             0.0
                         };
@@ -876,11 +881,31 @@ impl App {
                                                     .size(l::SMALL_FONT)
                                                     .color(theme::MUTED),
                                             );
+                                            let highpass = self
+                                                .snapshot
+                                                .status
+                                                .as_ref()
+                                                .filter(|s| s.highpass)
+                                                .and(self.info.as_ref())
+                                                .map(|info| {
+                                                    (
+                                                        frx_audio::config::HIGHPASS_CUTOFF_HZ,
+                                                        info.sample_rate,
+                                                    )
+                                                });
                                             widgets::spectrum_view(
                                                 ui,
                                                 self.spectrum.as_ref().map(|(_, s)| s),
                                                 self.spectral.floor_db() as f32,
-                                                l::SPECTRUM_HEIGHT,
+                                                self.spectrum_height
+                                                    .clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT),
+                                                highpass,
+                                            );
+                                            widgets::height_handle(
+                                                ui,
+                                                &mut self.spectrum_height,
+                                                l::PLOT_HEIGHT_MIN,
+                                                l::PLOT_MAX_HEIGHT,
                                             );
                                         });
                                 },
