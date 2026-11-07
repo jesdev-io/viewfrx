@@ -40,8 +40,14 @@ pub mod controls {
     pub const SPECTRUM_MIN_HZ: f32 = frx_core::spectrum::MIN_GRID_HZ;
     /// Minimum zoom window length in seconds.
     pub const ZOOM_MIN_SECONDS: f64 = 0.01;
-    /// Zoom step factor for buttons and scroll wheel.
+    /// Zoom step factor for the +/- buttons.
     pub const ZOOM_FACTOR: f64 = 2.0;
+    /// Wheel zoom is delta-proportional and view-relative: one notch (~40 pt)
+    /// scales the current view by 1 + ZOOM_WHEEL_STEP_PER_NOTCH.
+    pub const ZOOM_WHEEL_NOTCH_POINTS: f32 = 40.0;
+    pub const ZOOM_WHEEL_STEP_PER_NOTCH: f64 = 0.25;
+    pub const ZOOM_WHEEL_MIN_FACTOR: f64 = 0.5;
+    pub const ZOOM_WHEEL_MAX_FACTOR: f64 = 2.0;
     /// Live spectrum re-analysis interval while playing, in seconds.
     #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_UPDATE_SECONDS: f64 = 0.1;

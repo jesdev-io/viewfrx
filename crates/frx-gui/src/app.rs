@@ -744,6 +744,7 @@ impl App {
             }
             return;
         }
+        self.last_play_start = Some(seconds);
         self.send(Command::Seek { seconds });
         self.seek_sent = Instant::now();
     }
@@ -780,24 +781,27 @@ impl App {
             self.zoom = None; // double-click also resets the zoom to the full view
             return;
         }
-        // latest_pos works for hover (scroll zoom) and clicks alike;
-        // interact_pointer_pos is None while no button is held.
+        // interact_pos is exact while a button is held (clicks); latest_pos
+        // covers pure hover (scroll zoom).
         let fraction = |ui: &egui::Ui| {
-            ui.input(|i| i.pointer.latest_pos())
+            ui.input(|i| i.pointer.interact_pos().or(i.pointer.latest_pos()))
                 .map(|p| (p.x - response.rect.left()) / response.rect.width())
                 .filter(|f| f.is_finite())
         };
-        // Scroll wheel over a plot zooms in/out around the pointer (tandem).
+        // Scroll wheel over a plot zooms around the cursor (tandem). The step
+        // is proportional to the scroll delta and relative to the current view
+        // (a view-fraction scale), not an absolute time jump.
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y + i.raw_scroll_delta.y);
-            if scroll > 0.0 {
-                if let Some(f) = fraction(ui) {
-                    self.zoom_at(f, 1.0 / c::ZOOM_FACTOR);
-                }
-            } else if scroll < 0.0
+            if scroll != 0.0
                 && let Some(f) = fraction(ui)
             {
-                self.zoom_at(f, c::ZOOM_FACTOR);
+                let notches = (scroll / c::ZOOM_WHEEL_NOTCH_POINTS) as f64;
+                // Wheel up (positive delta) zooms in: scale < 1 shrinks the
+                // view-relative window; wheel down zooms out.
+                let scale = (1.0 - c::ZOOM_WHEEL_STEP_PER_NOTCH * notches)
+                    .clamp(c::ZOOM_WHEEL_MIN_FACTOR, c::ZOOM_WHEEL_MAX_FACTOR);
+                self.zoom_at(f, scale);
             }
         }
         // Right-click at a time position creates a timestamp annotation there.

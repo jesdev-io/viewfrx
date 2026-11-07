@@ -479,10 +479,17 @@ fn scroll_wheel_over_waveform_zooms_around_cursor() {
         });
     });
     let zoom = app.zoom.expect("scroll wheel must zoom in");
-    // Cursor at 75% of a 10 s file: zoom window centers near 7.5 s.
+    // Cursor at 75% of a 10 s file: the window centers toward 7.5 s but is
+    // clamped at the file end (end == 10), shifting the center a bit left.
     let center = (zoom.start + zoom.end) / 2.0;
-    assert!((center - 7.5).abs() < 0.5, "center {center}");
-    assert!(zoom.len() < 10.0);
+    assert!(center > 6.0 && center <= 7.5 + 1e-9, "center {center}");
+    assert!((zoom.end - 10.0).abs() < 1e-9, "end {}", zoom.end);
+    // One wheel notch is a gentle view-relative scale, not a 2x cut.
+    assert!(
+        zoom.len() < 10.0 && zoom.len() > 10.0 / 2.0,
+        "len {}",
+        zoom.len()
+    );
     // Scroll down zooms back out to the full view.
     let input = egui::RawInput {
         events: vec![
@@ -567,4 +574,59 @@ fn waveform_click_drops_marker_and_preselects_annotation_field() {
         }]
     );
     assert!(!app.annotation_text.contains("\n\n"));
+}
+
+#[test]
+fn right_click_maps_cursor_position_to_absolute_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    app.browser.selected = Some(dir.path().join("a.wav"));
+    app.info = Some(AudioInfo {
+        sample_rate: 8000,
+        channels: 2,
+        frames: Some(80000),
+        duration_seconds: Some(10.0),
+        bits_per_sample: Some(16),
+        tags: vec![],
+    });
+    let mut rect = egui::Rect::NOTHING;
+    let _ = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            rect = waveform_view(ui, None, 0.0, 10.0, 120.0).rect;
+        });
+    });
+    // Right-click at 20% / 50% / 80% of a 10 s file -> markers at 2/5/8 s.
+    for (frac, expected) in [(0.2f32, 2.0f64), (0.5, 5.0), (0.8, 8.0)] {
+        app.annotations.clear();
+        let position = pos2(rect.left() + rect.width() * frac, rect.center().y);
+        for pressed in [true, false] {
+            let input = egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Secondary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let response = waveform_view(ui, None, 0.0, 10.0, 120.0);
+                    app.handle_seek(response, ui);
+                });
+            });
+        }
+        assert_eq!(
+            app.annotations,
+            vec![Annotation {
+                seconds: expected,
+                text: String::new()
+            }],
+            "click at {frac} of 10 s"
+        );
+    }
 }
