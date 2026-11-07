@@ -900,6 +900,7 @@ impl App {
                                                 self.spectrum_height
                                                     .clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT),
                                                 highpass,
+                                                self.info.as_ref().map_or(48000, |i| i.sample_rate),
                                             );
                                             widgets::height_handle(
                                                 ui,

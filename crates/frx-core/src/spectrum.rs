@@ -22,6 +22,29 @@ pub struct Spectrum {
     pub hz_per_bin: f32,
     /// Low frequencies first; amplitude dBFS, floored at FLOOR_DBFS.
     pub dbfs: Vec<f32>,
+    /// ISO 1/3-octave center frequencies up to Nyquist (the display grid).
+    pub third_octave_hz: Vec<f32>,
+}
+
+/// Lowest grid frequency of the spectrum display, in Hz.
+pub const MIN_GRID_HZ: f32 = 20.0;
+
+/// ISO 266-style 1/3-octave center frequencies (1000 * 2^(k/3)) from
+/// MIN_GRID_HZ up to `nyquist_hz`, used as the spectrum grid.
+pub fn third_octave_centers(nyquist_hz: f32) -> Vec<f32> {
+    let mut centers = Vec::new();
+    let mut k = -17i32; // 1000 * 2^(k/3) starts just below 20 Hz
+    loop {
+        let f = 1000.0 * 2f32.powf(k as f32 / 3.0);
+        if f > nyquist_hz.max(MIN_GRID_HZ) {
+            break;
+        }
+        if f >= MIN_GRID_HZ {
+            centers.push(f);
+        }
+        k += 1;
+    }
+    centers
 }
 
 /// Magnitude spectrum of one Hann-windowed block starting at `position_seconds`
@@ -66,13 +89,15 @@ pub fn analyze_at(
         frames += 1;
     }
     let dbfs = transform.spectrum(&ring, 0)?;
+    let nyquist = sample_rate as f32 / 2.0;
     Ok(Spectrum {
         sample_rate,
         position_seconds: position,
         frames,
         fft_size: size,
         frequency_bins: dbfs.len(),
-        hz_per_bin: sample_rate as f32 / 2.0 / dbfs.len() as f32,
+        hz_per_bin: nyquist / dbfs.len() as f32,
+        third_octave_hz: third_octave_centers(nyquist),
         dbfs,
     })
 }
@@ -126,6 +151,21 @@ mod tests {
         assert!(analyze_at(&path, Settings { fft_size: 1000 }, 0.0, || false).is_err());
         // Cancellation works.
         assert!(analyze_at(&path, Settings { fft_size: 1024 }, 0.0, || true).is_err());
+    }
+
+    #[test]
+    fn third_octave_centers_cover_iso_bands_up_to_nyquist() {
+        let centers = third_octave_centers(8000.0);
+        assert!(centers.first().unwrap() >= &MIN_GRID_HZ);
+        assert!(centers.contains(&1000.0));
+        assert!((centers[centers.len() - 1] - 8000.0).abs() < 500.0);
+        assert!(centers.iter().all(|f| *f <= 8000.0 + 1.0));
+        // Roughly 10 bands per decade: 20 Hz..8 kHz is ~2.6 decades -> ~26 bands.
+        assert!((20..=32).contains(&centers.len()), "{}", centers.len());
+        // Spacing is one third of an octave: f[k+3] == 2 * f[k].
+        for k in 0..centers.len() - 3 {
+            assert!((centers[k + 3] / centers[k] - 2.0).abs() < 0.01);
+        }
     }
 
     #[test]

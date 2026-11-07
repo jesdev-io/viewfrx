@@ -16,21 +16,37 @@ pub fn drag_height(value: f32, delta_y: f32, min: f32, max: f32) -> f32 {
 }
 
 /// Drag strip at a plot's bottom edge: dragging resizes the plot height
-/// within [min, max]. Returns true when the height changed.
-pub fn height_handle(ui: &mut egui::Ui, value: &mut f32, min: f32, max: f32) -> bool {
+/// within [min, max]. Returns the handle response.
+pub fn height_handle(ui: &mut egui::Ui, value: &mut f32, min: f32, max: f32) -> Response {
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), l::HEIGHT_HANDLE), Sense::drag());
-    let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
-    let mut changed = false;
+    let response = response
+        .on_hover_cursor(egui::CursorIcon::ResizeVertical)
+        .on_hover_text("Drag down/up to resize this plot");
     if response.dragged() {
         *value = drag_height(*value, response.drag_delta().y, min, max);
-        changed = true;
     }
-    ui.painter_at(rect).line_segment(
+    // Visible grip so the handle is discoverable: a centered grab bar that
+    // highlights on hover/drag.
+    let painter = ui.painter_at(rect);
+    if response.hovered() || response.dragged() {
+        painter.rect_filled(rect, 0, theme::RAISED);
+    }
+    let grip = egui::Rect::from_center_size(rect.center(), vec2(46.0, 3.0));
+    painter.rect_filled(
+        grip,
+        2,
+        if response.dragged() {
+            theme::AMBER
+        } else {
+            theme::MUTED
+        },
+    );
+    painter.line_segment(
         [rect.left_bottom(), rect.right_bottom()],
         Stroke::new(l::THIN_STROKE, theme::RAISED),
     );
-    changed
+    response
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -321,8 +337,9 @@ pub fn playhead(painter: &egui::Painter, rect: egui::Rect, position: f64, window
     }
 }
 
-/// Live magnitude spectrum panel (bottom right of the center area). dBFS vs
-/// linear frequency, same calibration/floor conventions as the spectrogram.
+/// Live magnitude spectrum panel (bottom right of the center area). Log-frequency
+/// axis with a 1/3-octave center-frequency grid and a height-dependent dB step
+/// grid; when the fixed highpass is enabled its response curve is plotted too.
 #[cfg(feature = "spectrogram")]
 pub fn spectrum_view(
     ui: &mut egui::Ui,
@@ -332,74 +349,95 @@ pub fn spectrum_view(
     // When the fixed highpass is enabled: (cutoff Hz, sample rate); its
     // one-pole magnitude response is plotted over the spectrum.
     highpass: Option<(f32, u32)>,
+    sample_rate: u32,
 ) -> Response {
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, l::PLOT_RADIUS, theme::PANEL);
-    let y = |db: f32| {
-        rect.bottom()
-            - ((db - floor_db) / (c::SPECTRAL_CEILING_DB - floor_db)).clamp(0.0, 1.0)
-                * (rect.height() - 2.0 * l::SPACE_SMALL)
+    let pad = l::SPACE_SMALL;
+    let inner = egui::Rect::from_min_size(
+        rect.left_top() + vec2(pad + 14.0, pad),
+        vec2(
+            (rect.width() - 2.0 * pad - 14.0).max(10.0),
+            (rect.height() - 2.0 * pad).max(10.0),
+        ),
+    );
+    let nyquist = (sample_rate.max(1) as f32 / 2.0).max(c::SPECTRUM_MIN_HZ * 2.0);
+    let f_min = c::SPECTRUM_MIN_HZ.min(nyquist / 2.0);
+    let x_of = |hz: f32| -> f32 {
+        let f = hz.clamp(f_min, nyquist);
+        inner.left()
+            + (f.log10() - f_min.log10()) / (nyquist.log10() - f_min.log10()) * inner.width()
     };
+    let y_of = |db: f32| {
+        inner.bottom()
+            - ((db - floor_db) / (c::SPECTRAL_CEILING_DB - floor_db)).clamp(0.0, 1.0)
+                * inner.height()
+    };
+    // Horizontal dB grid: the step adapts to the current panel height.
+    let step = db_grid_step(height, floor_db, c::SPECTRAL_CEILING_DB);
+    let mut db = (floor_db / step).ceil() * step;
+    while db <= c::SPECTRAL_CEILING_DB + 1e-6 {
+        let y = y_of(db);
+        painter.line_segment(
+            [pos2(inner.left(), y), pos2(inner.right(), y)],
+            Stroke::new(l::THIN_STROKE, theme::RAISED),
+        );
+        painter.text(
+            pos2(rect.left() + 2.0, y),
+            egui::Align2::LEFT_CENTER,
+            format!("{db:.0}"),
+            egui::FontId::monospace(l::MICRO_FONT),
+            theme::MUTED,
+        );
+        db += step;
+    }
+    // Vertical 1/3-octave center-frequency grid.
+    for hz in frx_core::spectrum::third_octave_centers(nyquist) {
+        let x = x_of(hz);
+        painter.line_segment(
+            [pos2(x, inner.top()), pos2(x, inner.bottom())],
+            Stroke::new(l::THIN_STROKE, theme::RAISED),
+        );
+        painter.text(
+            pos2(x, rect.bottom() - 1.0),
+            egui::Align2::CENTER_BOTTOM,
+            format_hz(hz),
+            egui::FontId::monospace(l::MICRO_FONT),
+            theme::MUTED,
+        );
+    }
     if let Some(spectrum) = spectrum {
-        // Highpass filter response |H(f)| for y = a*(y + x - x_prev), plotted in
-        // dB over the same linear frequency axis when the filter is enabled.
-        if let Some((cutoff_hz, sample_rate)) = highpass {
-            let fs = sample_rate.max(1) as f32;
-            let a = (-std::f32::consts::TAU * cutoff_hz / fs).exp();
-            let bins = spectrum.dbfs.len();
-            let mut previous = None;
-            for i in 0..bins {
-                let f = i as f32 * spectrum.hz_per_bin;
-                let w = std::f32::consts::TAU * f / fs;
-                let mag = a * (2.0 * (w / 2.0).sin()) / (1.0 - 2.0 * a * w.cos() + a * a).sqrt();
-                let db = 20.0 * mag.max(1e-9).log10();
-                let x = rect.left()
-                    + l::SPACE_SMALL
-                    + (i as f32 / (bins - 1).max(1) as f32) * (rect.width() - 2.0 * l::SPACE_SMALL);
-                let point = pos2(x, y(db));
-                if let Some(p) = previous {
-                    painter.line_segment([p, point], Stroke::new(l::THIN_STROKE, theme::PURPLE));
-                }
-                previous = Some(point);
-            }
-        }
         let bins = spectrum.dbfs.len();
         if bins > 1 {
             let mut previous = None;
             for (i, &db) in spectrum.dbfs.iter().enumerate() {
-                let x = rect.left()
-                    + l::SPACE_SMALL
-                    + (i as f32 / (bins - 1) as f32) * (rect.width() - 2.0 * l::SPACE_SMALL);
-                let point = pos2(x, y(db));
+                let hz = (i as f32 + 0.5) * spectrum.hz_per_bin;
+                let point = pos2(x_of(hz), y_of(db));
                 if let Some(p) = previous {
                     painter.line_segment([p, point], Stroke::new(l::THIN_STROKE, theme::AMBER));
                 }
                 previous = Some(point);
             }
         }
-        painter.text(
-            rect.left_bottom() + vec2(l::SPACE_SMALL, -l::SPACE_SMALL),
-            egui::Align2::LEFT_BOTTOM,
-            "0 Hz",
-            egui::FontId::monospace(l::MICRO_FONT),
-            theme::MUTED,
-        );
-        painter.text(
-            rect.right_bottom() + vec2(-l::SPACE_SMALL, -l::SPACE_SMALL),
-            egui::Align2::RIGHT_BOTTOM,
-            format!("{:.1} kHz", spectrum.sample_rate as f32 / 2000.0),
-            egui::FontId::monospace(l::MICRO_FONT),
-            theme::MUTED,
-        );
-        painter.text(
-            rect.right_top() + vec2(-l::SPACE_SMALL, l::SPACE_SMALL),
-            egui::Align2::RIGHT_TOP,
-            format!("{:.0} … {:.0} dBFS", c::SPECTRAL_CEILING_DB, floor_db),
-            egui::FontId::monospace(l::MICRO_FONT),
-            theme::MUTED,
-        );
+        // Highpass filter response |H(f)| for y = a*(y + x - x_prev).
+        if let Some((cutoff_hz, fs)) = highpass {
+            let fs = fs.max(1) as f32;
+            let a = (-std::f32::consts::TAU * cutoff_hz / fs).exp();
+            let mut previous = None;
+            for i in 0..bins.max(1) {
+                let hz = (i as f32 + 0.5) * spectrum.hz_per_bin;
+                let w = std::f32::consts::TAU * hz / fs;
+                let mag = a * (2.0 * (w / 2.0).sin()) / (1.0 - 2.0 * a * w.cos() + a * a).sqrt();
+                let db = 20.0 * mag.max(1e-9).log10();
+                let point = pos2(x_of(hz), y_of(db));
+                if let Some(p) = previous {
+                    painter.line_segment([p, point], Stroke::new(l::THIN_STROKE, theme::PURPLE));
+                }
+                previous = Some(point);
+            }
+        }
     } else {
         painter.text(
             rect.center(),
@@ -409,9 +447,16 @@ pub fn spectrum_view(
             theme::MUTED,
         );
     }
+    painter.text(
+        rect.right_top() + vec2(-pad, pad),
+        egui::Align2::RIGHT_TOP,
+        format!("{:.0} dBFS top", c::SPECTRAL_CEILING_DB),
+        egui::FontId::monospace(l::MICRO_FONT),
+        theme::MUTED,
+    );
     if let Some((cutoff_hz, _)) = highpass {
         painter.text(
-            rect.left_top() + vec2(l::SPACE_SMALL, l::SPACE_SMALL),
+            rect.left_top() + vec2(pad + 14.0, pad),
             egui::Align2::LEFT_TOP,
             format!("HPF {cutoff_hz:.0} Hz"),
             egui::FontId::monospace(l::MICRO_FONT),
@@ -419,15 +464,75 @@ pub fn spectrum_view(
         );
     }
     response.on_hover_text(if highpass.is_some() {
-        "Amber: magnitude spectrum at the playhead. Purple: fixed highpass filter response (enabled)."
+        "Amber: magnitude spectrum at the playhead (log frequency, 1/3-octave grid). Purple: fixed highpass response (enabled)."
     } else {
-        "Magnitude spectrum at the playhead, dBFS."
+        "Magnitude spectrum at the playhead, dBFS, log frequency with 1/3-octave grid; dB grid step adapts to the panel height."
     })
+}
+
+/// Pick the smallest dB grid step that still leaves enough pixels between
+/// lines at the current panel height (height-dependent dB steps).
+#[cfg(feature = "spectrogram")]
+pub fn db_grid_step(height: f32, floor_db: f32, ceiling_db: f32) -> f32 {
+    let px_per_db = (height - 2.0 * l::SPACE_SMALL) / (ceiling_db - floor_db).max(1.0);
+    c::SPECTRUM_DB_STEPS
+        .iter()
+        .copied()
+        .find(|step| step * px_per_db >= c::SPECTRUM_MIN_GRID_PX)
+        .unwrap_or_else(|| *c::SPECTRUM_DB_STEPS.last().unwrap())
+}
+
+/// Compact frequency label for the 1/3-octave grid: 31.5, 1k, 10k.
+#[cfg(feature = "spectrogram")]
+pub fn format_hz(hz: f32) -> String {
+    if hz >= 1000.0 {
+        let khz = hz / 1000.0;
+        if (khz - khz.round()).abs() < 0.05 {
+            format!("{}k", khz.round() as u32)
+        } else {
+            format!("{khz:.1}k")
+        }
+    } else if (hz - hz.round()).abs() < 0.05 {
+        format!("{}", hz.round() as u32)
+    } else {
+        format!("{hz:.1}")
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "spectrogram")]
+    #[test]
+    fn db_grid_step_depends_on_panel_height() {
+        // Short panel: only coarse steps fit -> 20 dB. Tall panel: fine steps.
+        assert_eq!(db_grid_step(130.0, -100.0, 0.0), 20.0);
+        assert_eq!(db_grid_step(380.0, -100.0, 0.0), 10.0);
+        assert!(db_grid_step(60.0, -100.0, 0.0) >= db_grid_step(380.0, -100.0, 0.0));
+        assert_eq!(format_hz(1000.0), "1k");
+        assert_eq!(format_hz(10000.0), "10k");
+        assert_eq!(format_hz(31.5), "31.5");
+        assert_eq!(format_hz(250.0), "250");
+    }
+
+    #[cfg(feature = "spectrogram")]
+    #[test]
+    fn spectrum_handle_sits_directly_below_the_spectrum_view() {
+        let ctx = egui::Context::default();
+        let mut spectrum_rect = egui::Rect::NOTHING;
+        let mut handle_rect = egui::Rect::NOTHING;
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                spectrum_rect = spectrum_view(ui, None, -100.0, 130.0, None, 48000).rect;
+                let mut h = 130.0f32;
+                handle_rect =
+                    height_handle(ui, &mut h, l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT).rect;
+            });
+        });
+        assert!(spectrum_rect.width() > 100.0);
+        assert!(handle_rect.top() >= spectrum_rect.bottom() - 1.0);
+    }
+
     #[test]
     fn bottom_handle_drag_down_expands_and_drag_up_compacts() {
         // Screen y grows downward: dragging the lower handle down (positive

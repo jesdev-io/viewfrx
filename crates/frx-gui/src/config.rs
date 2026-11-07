@@ -28,6 +28,16 @@ pub mod controls {
     pub const DEBUG_CONSOLE_DEFAULT: bool = false;
     #[cfg(feature = "spectrogram")]
     pub const SPECTRUM_DEFAULT: bool = true;
+    /// Candidate dB grid steps (ascending); the smallest one that still fits
+    /// the current panel height is used, so the grid adapts to resizing.
+    #[cfg(feature = "spectrogram")]
+    pub const SPECTRUM_DB_STEPS: &[f32] = &[3.0, 6.0, 10.0, 12.0, 15.0, 20.0];
+    /// Minimum vertical pixels between dB grid lines.
+    #[cfg(feature = "spectrogram")]
+    pub const SPECTRUM_MIN_GRID_PX: f32 = 22.0;
+    /// Lowest displayed frequency of the log-axis spectrum grid.
+    #[cfg(feature = "spectrogram")]
+    pub const SPECTRUM_MIN_HZ: f32 = frx_core::spectrum::MIN_GRID_HZ;
     /// Minimum zoom window length in seconds.
     pub const ZOOM_MIN_SECONDS: f64 = 0.01;
     /// Zoom step factor for buttons and scroll wheel.
