@@ -345,15 +345,24 @@ pub enum AnalysisEvent {
         u64,
         Result<Option<crate::spectral::RenderedSpectrum>, String>,
     ),
+    /// Live magnitude spectrum at a playhead position (u64 id, position seconds).
+    #[cfg(feature = "spectrogram")]
+    Spectrum(u64, f64, Result<frx_core::spectrum::Spectrum, String>),
 }
 #[derive(Default)]
 pub struct AnalysisOptions {
     #[cfg(feature = "spectrogram")]
     pub spectral: Option<crate::spectral::RenderSettings>,
 }
+enum AnalysisJobKind {
+    Full,
+    #[cfg(feature = "spectrogram")]
+    Spectrum { fft_size: usize, position: f64 },
+}
 struct AnalysisJob {
     id: u64,
     path: PathBuf,
+    kind: AnalysisJobKind,
     #[cfg(feature = "spectrogram")]
     options: AnalysisOptions,
 }
@@ -387,6 +396,18 @@ impl AnalysisService {
                 let path = job.path;
                 let cancelled =
                     || stop.load(Ordering::Acquire) || version.load(Ordering::Acquire) != id;
+                #[cfg(feature = "spectrogram")]
+                if let AnalysisJobKind::Spectrum { fft_size, position } = job.kind {
+                    let result = frx_core::spectrum::analyze_at(
+                        &path,
+                        frx_core::spectrogram::Settings { fft_size },
+                        position,
+                        cancelled,
+                    )
+                    .map_err(|e| format!("{e:#}"));
+                    deliver(&tx, AnalysisEvent::Spectrum(id, position, result), cancelled, &ctx);
+                    continue;
+                }
                 let info = inspect(&path).map_err(|e| format!("{e:#}"));
                 #[cfg(feature = "spectrogram")]
                 let stereo = info.as_ref().is_ok_and(|i| i.channels == 2);
@@ -450,8 +471,21 @@ impl AnalysisService {
         *self.job.lock().unwrap() = Some(AnalysisJob {
             id,
             path,
+            kind: AnalysisJobKind::Full,
             #[cfg(feature = "spectrogram")]
             options: _options,
+        });
+        id
+    }
+    /// Live spectrum at a playhead position; replaces any queued analysis.
+    #[cfg(feature = "spectrogram")]
+    pub fn request_spectrum(&self, path: PathBuf, fft_size: usize, position: f64) -> u64 {
+        let id = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        *self.job.lock().unwrap() = Some(AnalysisJob {
+            id,
+            path,
+            kind: AnalysisJobKind::Spectrum { fft_size, position },
+            options: AnalysisOptions::default(),
         });
         id
     }

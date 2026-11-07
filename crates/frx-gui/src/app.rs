@@ -11,7 +11,7 @@ use crate::widgets::waveform_view;
 use crate::{
     Args,
     config::{controls as c, layout as l, runtime as r},
-    model::{Browser, seek_at},
+    model::{Browser, TimeWindow, seek_at},
     services::{
         AnalysisEvent, AnalysisOptions, AnalysisService, AudioRequest, AudioService, AudioSnapshot,
         FileEvent, FileService, LibraryService, ScanEvent,
@@ -45,6 +45,19 @@ pub struct App {
     annotation_text: String,
     highpass: bool,
     debug_console: bool,
+    /// Shared time-zoom window (None = full recording) for all plots.
+    zoom: Option<TimeWindow>,
+    /// User-draggable plot heights (session-local, never persisted).
+    wave_height: f32,
+    spec_height: f32,
+    #[cfg(feature = "spectrogram")]
+    spectrum_on: bool,
+    #[cfg(feature = "spectrogram")]
+    spectrum: Option<(f64, frx_core::spectrum::Spectrum)>,
+    #[cfg(feature = "spectrogram")]
+    spectrum_id: u64,
+    #[cfg(feature = "spectrogram")]
+    last_spectrum_pos: f64,
     browser: Browser,
     scan_id: u64,
     analysis_id: u64,
@@ -108,6 +121,17 @@ impl App {
             annotation_text: String::new(),
             highpass: c::HIGHPASS_DEFAULT,
             debug_console: args.debug_console,
+            zoom: None,
+            wave_height: 0.0,
+            spec_height: 0.0,
+            #[cfg(feature = "spectrogram")]
+            spectrum_on: c::SPECTRUM_DEFAULT,
+            #[cfg(feature = "spectrogram")]
+            spectrum: None,
+            #[cfg(feature = "spectrogram")]
+            spectrum_id: 0,
+            #[cfg(feature = "spectrogram")]
+            last_spectrum_pos: -1.0,
             library,
             browser: Browser::default(),
             scan_id,
@@ -288,6 +312,12 @@ impl App {
         self.waveform = None;
         self.annotations.clear();
         self.annotation_text.clear();
+        self.zoom = None;
+        #[cfg(feature = "spectrogram")]
+        {
+            self.spectrum = None;
+            self.last_spectrum_pos = -1.0;
+        }
         self.error = None;
         self.normalization_applied = None;
         self.pending_play = false;
@@ -387,6 +417,13 @@ impl App {
                         self.error = Some(error);
                     }
                 }
+                #[cfg(feature = "spectrogram")]
+                AnalysisEvent::Spectrum(id, position, result) if id == self.spectrum_id => {
+                    match result {
+                        Ok(spectrum) => self.spectrum = Some((position, spectrum)),
+                        Err(error) => self.error = Some(error),
+                    }
+                }
                 _ => {}
             }
         }
@@ -421,6 +458,25 @@ impl App {
                 Err(error) => {
                     crate::logln!("annotation write failed: {error}");
                     self.error = Some(error);
+                }
+            }
+        }
+        #[cfg(feature = "spectrogram")]
+        if self.spectrum_on {
+            let playing = self
+                .snapshot
+                .status
+                .as_ref()
+                .is_some_and(|s| s.state == "playing" && s.path == self.browser.selected);
+            if playing
+                && let Some(path) = self.browser.selected.clone()
+            {
+                let pos = self.position();
+                if (pos - self.last_spectrum_pos).abs() >= c::SPECTRUM_UPDATE_SECONDS {
+                    self.last_spectrum_pos = pos;
+                    self.spectrum_id =
+                        self.analysis
+                            .request_spectrum(path, self.spectral.fft_size(), pos);
                 }
             }
         }
@@ -537,18 +593,57 @@ impl App {
         self.send(Command::Seek { seconds });
         self.seek_sent = Instant::now();
     }
-    fn handle_seek(&mut self, response: egui::Response) {
+    /// Shared zoom window across all waveforms and spectrograms.
+    fn window(&self) -> TimeWindow {
+        self.zoom
+            .unwrap_or_else(|| TimeWindow::full(self.duration()))
+            .clamped(self.duration())
+    }
+    fn zoom_at(&mut self, center_fraction: f32, factor: f64) {
+        let duration = self.duration();
+        let window = self.window();
+        self.zoom = if factor < 1.0 {
+            Some(window.zoom_in(center_fraction, 1.0 / factor.max(1e-9), c::ZOOM_MIN_SECONDS, duration))
+        } else {
+            window.zoom_out(center_fraction, factor, duration)
+        };
+        crate::logln!(
+            "zoom {:?} (window {:.3}–{:.3} s of {:.3})",
+            self.zoom.is_some(),
+            self.window().start,
+            self.window().end,
+            duration
+        );
+    }
+    fn handle_seek(&mut self, response: egui::Response, ui: &egui::Ui) {
         if response.double_clicked() {
             self.seek(0.0);
+            self.zoom = None; // double-click also resets the zoom to the full view
             return;
+        }
+        let fraction = |ui: &egui::Ui| {
+            response
+                .interact_pointer_pos()
+                .map(|p| (p.x - response.rect.left()) / response.rect.width())
+                .filter(|f| f.is_finite())
+        };
+        // Scroll wheel over a plot zooms in/out around the pointer (tandem).
+        if response.hovered() {
+            let scroll = ui.input(|i| i.smooth_scroll_delta.y + i.raw_scroll_delta.y);
+            if scroll > 0.0 {
+                if let Some(f) = fraction(ui) {
+                    self.zoom_at(f, 1.0 / c::ZOOM_FACTOR);
+                }
+            } else if scroll < 0.0 {
+                if let Some(f) = fraction(ui) {
+                    self.zoom_at(f, c::ZOOM_FACTOR);
+                }
+            }
         }
         // Right-click at a time position creates a timestamp annotation there.
         if response.secondary_clicked()
-            && let Some(pointer) = response.interact_pointer_pos()
-            && let Some(seconds) = seek_at(
-                (pointer.x - response.rect.left()) / response.rect.width(),
-                self.duration(),
-            )
+            && let Some(f) = fraction(ui)
+            && let Some(seconds) = self.window().fraction_to_time(f)
         {
             self.add_annotations(vec![Annotation {
                 seconds,
@@ -560,11 +655,8 @@ impl App {
             || response.drag_stopped()
             || (response.dragged()
                 && self.seek_sent.elapsed() > Duration::from_millis(r::SEEK_THROTTLE_MS)))
-            && let Some(pointer) = response.interact_pointer_pos()
-            && let Some(seconds) = seek_at(
-                (pointer.x - response.rect.left()) / response.rect.width(),
-                self.duration(),
-            )
+            && let Some(f) = fraction(ui)
+            && let Some(seconds) = self.window().fraction_to_time(f)
         {
             self.seek(seconds);
         }

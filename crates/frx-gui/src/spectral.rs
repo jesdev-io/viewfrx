@@ -2,6 +2,7 @@
 //! runs on the analysis worker, texture upload/painting on the GUI thread.
 use crate::{
     config::{controls as c, layout as l},
+    model::TimeWindow,
     theme, widgets,
 };
 use eframe::egui::{self, Color32, Sense, pos2, vec2};
@@ -20,6 +21,8 @@ pub struct RenderedSpectrum {
     pub image: egui::ColorImage,
     pub right: Option<egui::ColorImage>,
     pub nyquist_hz: f32,
+    /// Seconds between spectrogram columns (hop / sample rate).
+    pub column_seconds: f64,
 }
 
 pub fn color(db: f32, floor: f32) -> Color32 {
@@ -54,6 +57,7 @@ pub fn render(data: Spectrogram, settings: RenderSettings) -> Option<RenderedSpe
         image: egui::ColorImage::new([data.columns, data.frequency_bins], pixels),
         right: None,
         nyquist_hz: data.sample_rate as f32 / 2.0,
+        column_seconds: data.hop_size as f64 / data.sample_rate.max(1) as f64,
     })
 }
 
@@ -66,6 +70,7 @@ pub struct View {
     right: Option<egui::TextureHandle>,
     pub channels: widgets::Channels,
     nyquist_hz: f32,
+    column_seconds: f64,
 }
 impl Default for View {
     fn default() -> Self {
@@ -78,10 +83,17 @@ impl Default for View {
             right: None,
             channels: Default::default(),
             nyquist_hz: 0.0,
+            column_seconds: 0.0,
         }
     }
 }
 impl View {
+    pub fn fft_size(&self) -> usize {
+        self.fft_size
+    }
+    pub fn floor_db(&self) -> f64 {
+        self.floor_db
+    }
     pub fn settings(&self) -> Option<RenderSettings> {
         self.enabled.then_some(RenderSettings {
             analysis: Settings {
@@ -140,6 +152,7 @@ impl View {
                 ctx.load_texture("spectrogram-right", image, egui::TextureOptions::LINEAR)
             });
             self.nyquist_hz = rendered.nyquist_hz;
+            self.column_seconds = rendered.column_seconds;
             ctx.load_texture("spectrogram", rendered.image, egui::TextureOptions::LINEAR)
         });
         Ok(())
@@ -151,7 +164,7 @@ impl View {
         &self,
         ui: &mut egui::Ui,
         position: f64,
-        duration: f64,
+        window: TimeWindow,
         height: f32,
         channel: usize,
         annotations: &[Annotation],
@@ -183,12 +196,18 @@ impl View {
         } else {
             &self.right
         } {
-            painter.image(
-                texture.id(),
-                rect,
-                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                Color32::WHITE,
+            // Zoom window: show only the columns whose centers fall inside
+            // [start, end], stretched across the full plot width.
+            let columns = texture.size()[0].max(1) as f64;
+            let col_seconds = self.column_seconds.max(1e-12);
+            let start_col = ((window.start / col_seconds) as usize).min(texture.size()[0] - 1);
+            let end_col = ((window.end / col_seconds) as usize + 1)
+                .clamp(start_col + 1, texture.size()[0]);
+            let uv = egui::Rect::from_min_max(
+                pos2(start_col as f32 / columns as f32, 0.0),
+                pos2(end_col as f32 / columns as f32, 1.0),
             );
+            painter.image(texture.id(), rect, uv, Color32::WHITE);
             painter.text(
                 rect.left_top() + vec2(l::SPACE_SMALL, l::SPACE_SMALL),
                 egui::Align2::LEFT_TOP,
@@ -223,8 +242,8 @@ impl View {
                 theme::MUTED,
             );
         }
-        widgets::annotation_lines(&painter, rect, annotations, duration);
-        widgets::playhead(&painter, rect, position, duration);
+        widgets::annotation_lines(&painter, rect, annotations, window);
+        widgets::playhead(&painter, rect, position, window);
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
     }
 }

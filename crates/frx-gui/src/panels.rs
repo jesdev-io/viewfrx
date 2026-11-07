@@ -420,10 +420,21 @@ impl App {
         }
         ui.separator();
         #[cfg(feature = "spectrogram")]
-        if self.spectral.controls(ui)
-            && let Some(path) = self.browser.selected.clone()
         {
-            self.request_analysis(path);
+            if widgets::reset_toggle(ui, &mut self.spectrum_on, c::SPECTRUM_DEFAULT, "Spectrum (live)")
+                .changed()
+            {
+                crate::logln!("spectrum view {}", if self.spectrum_on { "on" } else { "off" });
+            }
+            ui.small(
+                RichText::new("Magnitude spectrum at the playhead, bottom right. Shows HPF state.")
+                    .color(theme::MUTED),
+            );
+            if self.spectral.controls(ui)
+                && let Some(path) = self.browser.selected.clone()
+            {
+                self.request_analysis(path);
+            }
         }
         #[cfg(not(feature = "spectrogram"))]
         ui.small("Spectrogram requires a build with --features spectrogram.");
@@ -567,6 +578,7 @@ impl App {
                         ui.add_space(l::SPACE_MEDIUM);
                         let duration = self.duration();
                         let position = self.position();
+                        let window = self.window();
                         #[cfg(feature = "spectrogram")]
                         let spectral_chrome = if self.spectral.enabled {
                             l::SPECTRAL_CHROME_HEIGHT
@@ -575,20 +587,45 @@ impl App {
                         };
                         #[cfg(not(feature = "spectrogram"))]
                         let spectral_chrome = 0.0;
+                        #[cfg(feature = "spectrogram")]
+                        let spectrum_row = if self.spectrum_on {
+                            l::SPECTRUM_HEIGHT + 2.0 * l::SPACE_SMALL
+                        } else {
+                            0.0
+                        };
+                        #[cfg(not(feature = "spectrogram"))]
+                        let spectrum_row = 0.0;
                         let total_height = (content_bottom
                             - ui.cursor().top()
                             - l::TRANSPORT_HEIGHT
                             - l::WAVEFORM_CHROME_HEIGHT
-                            - spectral_chrome)
+                            - spectral_chrome
+                            - spectrum_row
+                            - 2.0 * l::SPACE_MEDIUM)
                             .clamp(l::PLOT_MIN_HEIGHT, l::PLOT_MAX_HEIGHT);
+                        // User-draggable plot heights (0 = initialize from layout).
                         #[cfg(feature = "spectrogram")]
-                        let wave_height = if self.spectral.enabled {
-                            total_height * (1.0 - l::SPECTRAL_HEIGHT_FRACTION)
+                        let default_spec: f32 = if self.spectral.enabled {
+                            total_height * l::SPECTRAL_HEIGHT_FRACTION
                         } else {
-                            total_height
+                            0.0
                         };
                         #[cfg(not(feature = "spectrogram"))]
-                        let wave_height = total_height;
+                        let default_spec: f32 = 0.0;
+                        if self.spec_height <= 0.0 {
+                            self.spec_height = default_spec.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
+                        }
+                        if self.wave_height <= 0.0 {
+                            self.wave_height =
+                                (total_height - default_spec).clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
+                        }
+                        let wave_height = self.wave_height.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
+                        #[cfg(feature = "spectrogram")]
+                        let spec_height = if self.spectral.enabled {
+                            self.spec_height.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT)
+                        } else {
+                            0.0
+                        };
                         ui.horizontal_wrapped(|ui| {
                             ui.label(
                                 RichText::new("ORIGINAL (DC-REMOVED)")
@@ -606,8 +643,64 @@ impl App {
                             if self.analyzing {
                                 ui.spinner();
                             }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    // Tandem zoom buttons; all plots share the window.
+                                    let center = window.time_to_fraction(position);
+                                    if ui
+                                        .small_button("−")
+                                        .on_hover_text("Zoom out (scroll wheel over a plot also zooms)")
+                                        .clicked()
+                                    {
+                                        self.zoom_at(center, c::ZOOM_FACTOR);
+                                    }
+                                    if ui
+                                        .small_button("+")
+                                        .on_hover_text("Zoom in")
+                                        .clicked()
+                                    {
+                                        self.zoom_at(center, 1.0 / c::ZOOM_FACTOR);
+                                    }
+                                    if self.zoom.is_some() {
+                                        ui.small(
+                                            RichText::new(format!(
+                                                "zoom {:.3}–{:.3} s",
+                                                window.start, window.end
+                                            ))
+                                            .color(theme::MUTED),
+                                        );
+                                    }
+                                },
+                            );
                         });
                         let stereo = self.info.as_ref().is_some_and(|i| i.channels == 2);
+                        #[cfg(feature = "spectrogram")]
+                        if self.spectral.enabled {
+                            self.spectral.channels.control(ui, "Spectrogram", stereo);
+                            let channels = self.spectral.channels.indices(stereo);
+                            for &ch in channels {
+                                if stereo {
+                                    ui.small(if ch == 0 { "SPEC L" } else { "SPEC R" });
+                                }
+                                let response = self.spectral.paint(
+                                    ui,
+                                    position,
+                                    window,
+                                    spec_height / channels.len() as f32,
+                                    ch,
+                                    &self.annotations,
+                                );
+                                self.handle_seek(response, ui);
+                            }
+                            widgets::height_handle(
+                                ui,
+                                &mut self.spec_height,
+                                l::PLOT_HEIGHT_MIN,
+                                l::PLOT_MAX_HEIGHT,
+                            );
+                            ui.add_space(l::SPACE_SMALL);
+                        }
                         self.wave_channels.control(ui, "Waveform", stereo);
                         let channels = self.wave_channels.indices(stereo);
                         for &ch in channels {
@@ -618,36 +711,34 @@ impl App {
                                 ui,
                                 self.waveform.as_ref(),
                                 position,
-                                duration,
+                                window,
                                 wave_height / channels.len() as f32,
                                 Some(ch),
                                 &self.annotations,
                             );
-                            self.handle_seek(response);
+                            self.handle_seek(response, ui);
                         }
-                        #[cfg(feature = "spectrogram")]
-                        if self.spectral.enabled {
-                            self.spectral.channels.control(ui, "Spectrogram", stereo);
-                            let channels = self.spectral.channels.indices(stereo);
-                            for &ch in channels {
-                                let response = self.spectral.paint(
-                                    ui,
-                                    position,
-                                    duration,
-                                    total_height * l::SPECTRAL_HEIGHT_FRACTION
-                                        / channels.len() as f32,
-                                    ch,
-                                    &self.annotations,
-                                );
-                                self.handle_seek(response);
-                            }
-                        }
+                        widgets::height_handle(
+                            ui,
+                            &mut self.wave_height,
+                            l::PLOT_HEIGHT_MIN,
+                            l::PLOT_MAX_HEIGHT,
+                        );
                         ui.horizontal(|ui| {
                             ui.monospace(clock(position));
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.monospace(clock(duration));
+                                    if self.zoom.is_some() {
+                                        ui.monospace(format!(
+                                            "{:.3}–{:.3} s of {}",
+                                            window.start,
+                                            window.end,
+                                            clock(duration)
+                                        ));
+                                    } else {
+                                        ui.monospace(clock(duration));
+                                    }
                                 },
                             );
                         });
@@ -733,6 +824,50 @@ impl App {
                                 self.annotations.len()
                             ));
                         });
+                        #[cfg(feature = "spectrogram")]
+                        if self.spectrum_on {
+                            ui.add_space(l::SPACE_SMALL);
+                            // Bottom right corner of the center area, left of the
+                            // playback options box.
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Min),
+                                |ui| {
+                                    let width =
+                                        (ui.available_width() * l::SPECTRUM_WIDTH_FRACTION)
+                                            .max(200.0);
+                                    egui::Frame::new()
+                                        .fill(theme::PANEL)
+                                        .inner_margin(l::CARD_PADDING)
+                                        .corner_radius(l::CARD_RADIUS)
+                                        .show(ui, |ui| {
+                                            ui.set_width(width);
+                                            let mut title = format!(
+                                                "SPECTRUM · dBFS @ {:.2} s",
+                                                self.spectrum.as_ref().map_or(0.0, |(p, _)| *p)
+                                            );
+                                            if self
+                                                .snapshot
+                                                .status
+                                                .as_ref()
+                                                .is_some_and(|s| s.highpass)
+                                            {
+                                                title.push_str(" · HPF ON");
+                                            }
+                                            ui.label(
+                                                RichText::new(title)
+                                                    .size(l::SMALL_FONT)
+                                                    .color(theme::MUTED),
+                                            );
+                                            widgets::spectrum_view(
+                                                ui,
+                                                self.spectrum.as_ref().map(|(_, s)| s),
+                                                self.spectral.floor_db() as f32,
+                                                l::SPECTRUM_HEIGHT,
+                                            );
+                                        });
+                                },
+                            );
+                        }
                     });
             });
     }

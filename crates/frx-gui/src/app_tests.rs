@@ -368,7 +368,7 @@ fn annotation_text_field_and_right_click_write_file_metadata_idempotently() {
         let _ = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let response = waveform_view(ui, None, 0.0, 1.0, 120.0);
-                app.handle_seek(response);
+                app.handle_seek(response, ui);
             });
         });
     }

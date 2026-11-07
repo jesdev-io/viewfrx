@@ -1,12 +1,32 @@
 //! Stateless paint/input helpers. Shared by the normal UI and headless egui tests.
 use crate::{
     config::{controls as c, layout as l},
+    model::TimeWindow,
     theme,
 };
 use eframe::egui::{self, Response, Sense, Stroke, pos2, vec2};
 use frx_audio::Status;
 use frx_core::{annotations::Annotation, waveform::Waveform};
 use std::ops::RangeInclusive;
+
+/// Drag strip at a plot's bottom edge: dragging resizes the plot height
+/// within [min, max]. Returns true when the height changed.
+pub fn height_handle(ui: &mut egui::Ui, value: &mut f32, min: f32, max: f32) -> bool {
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), l::HEIGHT_HANDLE), Sense::drag());
+    let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
+    let mut changed = false;
+    if response.dragged() {
+        // Dragging the bottom edge downward grows the plot.
+        *value = (*value - response.drag_delta().y).clamp(min, max);
+        changed = true;
+    }
+    ui.painter_at(rect).line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(l::THIN_STROKE, theme::RAISED),
+    );
+    changed
+}
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub enum Channels {
@@ -173,7 +193,15 @@ pub fn waveform_view(
     duration: f64,
     height: f32,
 ) -> Response {
-    waveform_channel_view(ui, waveform, position, duration, height, None, &[])
+    waveform_channel_view(
+        ui,
+        waveform,
+        position,
+        TimeWindow::full(duration),
+        height,
+        None,
+        &[],
+    )
 }
 
 /// Vertical lines for timestamp annotations stored in the file's metadata.
@@ -181,13 +209,10 @@ pub fn annotation_lines(
     painter: &egui::Painter,
     rect: egui::Rect,
     annotations: &[Annotation],
-    duration: f64,
+    window: TimeWindow,
 ) {
-    if duration <= 0.0 {
-        return;
-    }
     for annotation in annotations {
-        let x = rect.left() + (annotation.seconds / duration).clamp(0.0, 1.0) as f32 * rect.width();
+        let x = rect.left() + window.time_to_fraction(annotation.seconds) * rect.width();
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
             Stroke::new(l::THIN_STROKE, theme::ANNOTATION),
@@ -199,7 +224,7 @@ pub fn waveform_channel_view(
     ui: &mut egui::Ui,
     waveform: Option<&Waveform>,
     position: f64,
-    duration: f64,
+    window: TimeWindow,
     height: f32,
     channel: Option<usize>,
     annotations: &[Annotation],
@@ -232,15 +257,26 @@ pub fn waveform_channel_view(
             .and_then(|c| waveform.dc_offset.get(c))
             .copied()
             .unwrap_or(0.0);
-        let columns = (rect.width().ceil() as usize).max(1).min(peaks.len());
+        // Zoom window: only bins intersecting [start, end] are painted,
+        // stretched across the full plot width (all plots share the window).
+        let bin_seconds = waveform.frames_per_bin as f64 / waveform.sample_rate.max(1) as f64;
+        let (first, last) = if peaks.is_empty() {
+            (0, 0)
+        } else {
+            let first = ((window.start / bin_seconds) as usize).min(peaks.len() - 1);
+            let last = ((window.end / bin_seconds) as usize + 1).clamp(first + 1, peaks.len());
+            (first, last)
+        };
+        let visible = &peaks[first..last];
+        let columns = (rect.width().ceil() as usize).max(1).min(visible.len());
         let normalized = waveform.normalization().map_or(1.0, |n| n.gain);
         // Two passes guarantee the original is in front, never painted over by
         // the quieter normalization preview. Both are source-relative, not live gain.
         for (gain, color) in [(normalized, theme::NORMALIZED_WAVE), (1.0, theme::AMBER)] {
             for column in 0..columns {
-                let start = column * peaks.len() / columns;
-                let end = ((column + 1) * peaks.len() / columns).max(start + 1);
-                let (min, max) = peaks[start..end]
+                let start = column * visible.len() / columns;
+                let end = ((column + 1) * visible.len() / columns).max(start + 1);
+                let (min, max) = visible[start..end]
                     .iter()
                     .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), p| {
                         (min.min(p.min - dc), max.max(p.max - dc))
@@ -265,19 +301,84 @@ pub fn waveform_channel_view(
             theme::MUTED,
         );
     }
-    annotation_lines(&painter, rect, annotations, duration);
-    playhead(&painter, rect, position, duration);
+    annotation_lines(&painter, rect, annotations, window);
+    playhead(&painter, rect, position, window);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-pub fn playhead(painter: &egui::Painter, rect: egui::Rect, position: f64, duration: f64) {
-    if duration > 0.0 {
-        let x = rect.left() + (position / duration).clamp(0.0, 1.0) as f32 * rect.width();
+pub fn playhead(painter: &egui::Painter, rect: egui::Rect, position: f64, window: TimeWindow) {
+    if window.len() > 0.0 {
+        let x = rect.left() + window.time_to_fraction(position) * rect.width();
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
             Stroke::new(l::PLAYHEAD_STROKE, theme::PURPLE),
         );
     }
+}
+
+/// Live magnitude spectrum panel (bottom right of the center area). dBFS vs
+/// linear frequency, same calibration/floor conventions as the spectrogram.
+#[cfg(feature = "spectrogram")]
+pub fn spectrum_view(
+    ui: &mut egui::Ui,
+    spectrum: Option<&frx_core::spectrum::Spectrum>,
+    floor_db: f32,
+    height: f32,
+) -> Response {
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, l::PLOT_RADIUS, theme::PANEL);
+    let y = |db: f32| {
+        rect.bottom()
+            - ((db - floor_db) / (c::SPECTRAL_CEILING_DB - floor_db)).clamp(0.0, 1.0)
+                * (rect.height() - 2.0 * l::SPACE_SMALL)
+    };
+    if let Some(spectrum) = spectrum {
+        let bins = spectrum.dbfs.len();
+        if bins > 1 {
+            let mut previous = None;
+            for (i, &db) in spectrum.dbfs.iter().enumerate() {
+                let x = rect.left() + l::SPACE_SMALL
+                    + (i as f32 / (bins - 1) as f32) * (rect.width() - 2.0 * l::SPACE_SMALL);
+                let point = pos2(x, y(db));
+                if let Some(p) = previous {
+                    painter.line_segment([p, point], Stroke::new(l::THIN_STROKE, theme::AMBER));
+                }
+                previous = Some(point);
+            }
+        }
+        painter.text(
+            rect.left_bottom() + vec2(l::SPACE_SMALL, -l::SPACE_SMALL),
+            egui::Align2::LEFT_BOTTOM,
+            "0 Hz",
+            egui::FontId::monospace(l::MICRO_FONT),
+            theme::MUTED,
+        );
+        painter.text(
+            rect.right_bottom() + vec2(-l::SPACE_SMALL, -l::SPACE_SMALL),
+            egui::Align2::RIGHT_BOTTOM,
+            format!("{:.1} kHz", spectrum.sample_rate as f32 / 2000.0),
+            egui::FontId::monospace(l::MICRO_FONT),
+            theme::MUTED,
+        );
+        painter.text(
+            rect.right_top() + vec2(-l::SPACE_SMALL, l::SPACE_SMALL),
+            egui::Align2::RIGHT_TOP,
+            format!("{:.0} … {:.0} dBFS", c::SPECTRAL_CEILING_DB, floor_db),
+            egui::FontId::monospace(l::MICRO_FONT),
+            theme::MUTED,
+        );
+    } else {
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Spectrum",
+            egui::FontId::proportional(l::BODY_FONT),
+            theme::MUTED,
+        );
+    }
+    response
 }
 
 #[cfg(test)]
