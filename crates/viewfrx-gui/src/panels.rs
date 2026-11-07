@@ -145,7 +145,7 @@ impl App {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            RichText::new("LOCAL AUDIO · NO UPLOADS")
+                            RichText::new("LOCAL AUDIO")
                                 .size(l::SMALL_FONT)
                                 .color(theme::MUTED),
                         );
@@ -245,7 +245,7 @@ impl App {
                     ui.add_space(l::EMPTY_GAP);
                     ui.label("Drop audio files or folders here.");
                     ui.label(
-                        RichText::new("Imported files stay where they are.").color(theme::MUTED),
+                        RichText::new("Imported files remain as-is during browsing and listening.").color(theme::MUTED),
                     );
                 } else if self.browser.visible.is_empty() && !self.scanning {
                     ui.label("No matching files.");
@@ -302,8 +302,7 @@ impl App {
     fn settings_contents(&mut self, ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing.y = l::SETTINGS_ITEM_GAP;
         ui.add_space(l::SPACE_SMALL);
-        ui.heading("PLAYBACK");
-        ui.small(RichText::new("Double-click a control to reset.").color(theme::MUTED));
+        ui.heading("PLAYBACK SETTINGS");
         ui.label("Output device");
         let previous = self.device;
         let label = self
@@ -353,7 +352,6 @@ impl App {
                 self.error = Some(e);
             }
         }
-        ui.small(RichText::new("Changing output stops playback.").color(theme::MUTED));
         ui.separator();
         ui.label("Gain · dB");
         if widgets::reset_slider(
@@ -399,14 +397,14 @@ impl App {
             self.send(Command::Rate { value: self.rate });
         }
         ui.small(RichText::new("Rate changes pitch.").color(theme::MUTED));
-        if widgets::reset_toggle(ui, &mut self.highpass, false, "Highpass (infra-sound)").changed()
+        if widgets::reset_toggle(ui, &mut self.highpass, false, "20 Hz Highpass").changed()
         {
             self.send(Command::Highpass {
                 enabled: self.highpass,
             });
         }
         ui.small(
-            RichText::new("Fixed highpass removes infra-sound; DC offset is always removed.")
+            RichText::new("Fixed highpass attenuates frequencies below 20 Hz; DC offset is always removed.")
                 .color(theme::MUTED),
         );
         ui.separator();
@@ -445,7 +443,7 @@ impl App {
                 );
             }
             ui.small(
-                RichText::new("Magnitude spectrum at the playhead, bottom right. Shows HPF state.")
+                RichText::new("Magnitude spectrum at the playhead.")
                     .color(theme::MUTED),
             );
             if self.spectral.controls(ui)
@@ -475,7 +473,7 @@ impl App {
                 }
             );
         }
-        ui.small(RichText::new("Pipes console messages into a debug window.").color(theme::MUTED));
+        ui.small(RichText::new("Open the program's debug window.").color(theme::MUTED));
     }
     pub(super) fn center(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()
@@ -490,9 +488,9 @@ impl App {
                         ui.add_space(ui.available_height() * l::EMPTY_TOP_FRACTION);
                         ui.image((self.logo.id(), vec2(l::EMPTY_LOGO, l::EMPTY_LOGO)));
                         ui.add_space(l::SPACE_SECTION);
-                        ui.heading("Find the sound.");
+                        ui.heading("Hear and see your sound.");
                         ui.label(
-                            RichText::new("Import a folder. Browse. Listen.").color(theme::MUTED),
+                            RichText::new("Import audio. Browse. Listen. See.").color(theme::MUTED),
                         );
                         ui.add_space(l::SPACE_LARGE);
                         if ui.button("Open audio folder").clicked() && self.picker.is_none() {
@@ -907,7 +905,7 @@ impl App {
                 let cursor_char = self.annotation_cursor_char;
                 let response = ui.add(
                     egui::TextEdit::multiline(&mut self.annotation_text)
-                        .hint_text("[hh:mm:ss:cc] note per row — markers appear instantly, Ctrl+S saves")
+                        .hint_text("[hh:mm:ss:cc] manually enter timestamp or right-click timeline")
                         .desired_width(f32::INFINITY)
                         .desired_rows(rows),
                 );
