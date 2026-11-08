@@ -5,6 +5,7 @@ This project is vibe coded by the LLMs Astra/Luna 6 and Mistral Large 4. Human i
 
 - `AI_POLICY.md`: (this file)
 - [`goal.md`](goal.md): requirements and specifications
+- Logo, icon and banner assets
 - Edits to [`goal.md`](goal.md) in the git history
 - Verbose text and strings appearing in the app
 

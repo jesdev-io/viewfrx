@@ -3,11 +3,11 @@
 [![CI](https://github.com/jesdev-io/viewfrx/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jesdev-io/viewfrx/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/jesdev-io/viewfrx)](https://github.com/jesdev-io/viewfrx/releases/latest)
 
-[AI use policy](AI_POLICY.md)
+> [!IMPORTANT]
+> This is vibe-coded. See the [**AI use policy**](AI_POLICY.md) for details.
 
 <p align="center">
   <img src="crates/viewfrx-gui/assets/viewfrx-logo.png" alt="viewfrx logo" width="430">
-  <img src="crates/viewfrx-gui/assets/viewfrx-icon.png" alt="viewfrx app icon" width="112">
 </p>
 
 A compact, CLI-first Rust audio browser with a **native desktop GUI**.
