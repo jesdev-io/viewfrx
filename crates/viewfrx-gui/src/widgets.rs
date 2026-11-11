@@ -513,15 +513,31 @@ pub fn spectrum_view(
         );
         db += step;
     }
-    // Vertical 1/3-octave grid: all lines, but labels only where they fit.
-    let mut last_label_x = f32::NEG_INFINITY;
-    for hz in viewfrx_core::spectrum::third_octave_centers(nyquist) {
+    // Nominal third-octave centers only; never synthesize axis labels.
+    let ticks: Vec<_> = SPECTRUM_TICKS
+        .iter()
+        .copied()
+        .filter(|hz| *hz >= f_min && *hz <= nyquist)
+        .collect();
+    let font = egui::FontId::monospace(l::MICRO_FONT);
+    let candidates: Vec<_> = ticks
+        .iter()
+        .map(|&hz| {
+            let width = painter
+                .layout_no_wrap(format_hz(hz), font.clone(), theme::MUTED)
+                .size()
+                .x;
+            (hz, x_of(hz), width)
+        })
+        .collect();
+    let labels = spectrum_tick_labels(&candidates, rect.left(), rect.right());
+    for (index, &hz) in ticks.iter().enumerate() {
         let x = x_of(hz);
         painter.line_segment(
             [pos2(x, inner.top()), pos2(x, inner.bottom())],
             Stroke::new(l::THIN_STROKE, theme::RAISED),
         );
-        if x - last_label_x >= l::SPECTRUM_MIN_XTICK_LABEL_PX {
+        if labels.contains(&index) {
             painter.text(
                 pos2(x, rect.bottom() - 1.0),
                 egui::Align2::CENTER_BOTTOM,
@@ -529,7 +545,6 @@ pub fn spectrum_view(
                 egui::FontId::monospace(l::MICRO_FONT),
                 theme::MUTED,
             );
-            last_label_x = x;
         }
     }
     if let Some(spectrum) = spectrum {
@@ -704,6 +719,53 @@ pub fn db_grid_step(height: f32, floor_db: f32, ceiling_db: f32) -> f32 {
         .unwrap_or_else(|| *c::SPECTRUM_DB_STEPS.last().unwrap())
 }
 
+/// Nominal preferred third-octave centers, not interpolated frequencies.
+#[cfg(feature = "spectrogram")]
+const SPECTRUM_TICKS: &[f32] = &[
+    20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
+    500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0,
+    8000.0, 10000.0, 12500.0, 16000.0, 20000.0,
+];
+
+#[cfg(feature = "spectrogram")]
+fn full_octave(hz: f32) -> bool {
+    [
+        31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+    ]
+    .contains(&hz)
+}
+
+/// Select whole labels using measured bounds. Reserve octave labels first;
+/// only add intermediate thirds when all visible octave labels fit.
+#[cfg(feature = "spectrogram")]
+fn spectrum_tick_labels(ticks: &[(f32, f32, f32)], left: f32, right: f32) -> Vec<usize> {
+    let mut selected: Vec<usize> = Vec::new();
+    for octaves in [true, false] {
+        if !octaves
+            && ticks
+                .iter()
+                .enumerate()
+                .any(|(i, &(hz, _, _))| full_octave(hz) && !selected.contains(&i))
+        {
+            break;
+        }
+        for (i, &(hz, x, width)) in ticks.iter().enumerate() {
+            if full_octave(hz) != octaves || x - width / 2.0 < left || x + width / 2.0 > right {
+                continue;
+            }
+            if selected.iter().all(|&j| {
+                let (_, other_x, other_width) = ticks[j];
+                (x - other_x).abs()
+                    >= ((width + other_width) / 2.0 + 6.0).max(l::SPECTRUM_MIN_XTICK_LABEL_PX)
+            }) {
+                selected.push(i);
+            }
+        }
+    }
+    selected.sort_unstable();
+    selected
+}
+
 /// Compact frequency label for the 1/3-octave grid: 31.5, 1k, 10k.
 #[cfg(feature = "spectrogram")]
 pub fn format_hz(hz: f32) -> String {
@@ -712,7 +774,7 @@ pub fn format_hz(hz: f32) -> String {
         if (khz - khz.round()).abs() < 0.05 {
             format!("{}k", khz.round() as u32)
         } else {
-            format!("{khz:.1}k")
+            format!("{khz}k")
         }
     } else if (hz - hz.round()).abs() < 0.05 {
         format!("{}", hz.round() as u32)
@@ -724,6 +786,42 @@ pub fn format_hz(hz: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "spectrogram")]
+    #[test]
+    fn spectrum_labels_drop_whole_thirds_before_octaves() {
+        let frequencies = [500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0];
+        let layout = |spacing: f32| {
+            frequencies
+                .iter()
+                .enumerate()
+                .map(|(i, &hz)| (hz, 30.0 + i as f32 * spacing, 28.0))
+                .collect::<Vec<_>>()
+        };
+        let wide = layout(40.0);
+        assert_eq!(
+            spectrum_tick_labels(&wide, 0.0, 300.0),
+            (0..7).collect::<Vec<_>>()
+        );
+        let medium = layout(15.0);
+        assert_eq!(spectrum_tick_labels(&medium, 0.0, 150.0), vec![0, 3, 6]);
+        let narrow = layout(7.0);
+        let selected = spectrum_tick_labels(&narrow, 0.0, 100.0);
+        assert!(!selected.is_empty());
+        assert!(selected.iter().all(|&i| full_octave(frequencies[i])));
+        for ticks in [&wide, &medium, &narrow] {
+            let selected = spectrum_tick_labels(ticks, 0.0, 300.0);
+            for pair in selected.windows(2) {
+                let (_, x1, w1) = ticks[pair[0]];
+                let (_, x2, w2) = ticks[pair[1]];
+                assert!(x2 - x1 >= (w1 + w2) / 2.0 + 6.0);
+            }
+        }
+        assert_eq!(format_hz(1250.0), "1.25k");
+        assert_eq!(format_hz(3150.0), "3.15k");
+        assert!(SPECTRUM_TICKS.contains(&31.5));
+        assert!(SPECTRUM_TICKS.contains(&63.0));
+    }
+
     #[cfg(feature = "spectrogram")]
     #[test]
     fn db_grid_step_depends_on_panel_height() {
