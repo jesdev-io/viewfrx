@@ -82,6 +82,9 @@ pub fn parse_timestamp(token: &str) -> Option<f64> {
 /// Parse free text into annotations: every `[hh:mm:ss:cc]` marker starts an
 /// annotation whose text runs until the next marker or the end of input.
 pub fn parse_text(input: &str) -> Result<Vec<Annotation>> {
+    if input.trim().is_empty() {
+        return Ok(Vec::new());
+    }
     let mut found = Vec::new();
     let bytes = input.as_bytes();
     let mut i = 0;
@@ -526,6 +529,8 @@ mod tests {
             "[00:00:01:00] thunder\n[00:02:00:50] rain starts later"
         );
         assert!(parse_text("no marker here").is_err());
+        assert!(parse_text("")?.is_empty());
+        assert!(parse_text(" \n\t")?.is_empty());
         Ok(())
     }
 
@@ -876,6 +881,11 @@ mod tests {
         // Delete every annotation (empty write) — the file must stay playable.
         write(&path, &[])?;
         assert_eq!(read(&path)?, Vec::new());
+        assert!(
+            !fs::read(&path)?
+                .windows(4)
+                .any(|bytes| bytes == WAV_ANNOTATION_CHUNK)
+        );
         let mut reader = AudioReader::open(&path)?;
         assert_eq!(reader.info().frames, Some(800));
         let mut frame = [0.0f32; 2];

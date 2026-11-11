@@ -837,11 +837,102 @@ fn deleting_an_annotation_row_removes_its_marker() {
     // Deleting all rows clears the list (the file stays untouched until saved).
     app.annotation_text = String::new();
     app.sync_annotations_from_text();
-    // Empty text does not parse -> markers stay (half-typed input is safe)...
-    assert_eq!(app.annotations.len(), 1);
+    assert!(app.annotations.is_empty());
+    // The initial saved document was empty; undoing every edit is clean.
+    assert!(!app.annotations_dirty);
     app.annotation_text = "[00:00:00:00]".into(); // parseable but empty-ish marker
     app.sync_annotations_from_text();
     assert_eq!(app.annotations.len(), 1);
+}
+
+#[test]
+fn loaded_annotation_edits_warn_and_empty_save_removes_frxa() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("annotated.wav");
+    let mut writer = hound::WavWriter::create(
+        &path,
+        hound::WavSpec {
+            channels: 1,
+            sample_rate: 8000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .unwrap();
+    for _ in 0..800 {
+        writer.write_sample(0i16).unwrap();
+    }
+    writer.finalize().unwrap();
+    let original = vec![Annotation {
+        seconds: 0.05,
+        text: "stored".into(),
+    }];
+    viewfrx_core::annotations::write(&path, &original).unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    app.select(path.clone(), false);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while app.saved_annotations != original && Instant::now() < deadline {
+        app.poll(&ctx);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(app.saved_annotations, original);
+    assert!(
+        !app.annotations_dirty,
+        "reading existing labels is not an edit"
+    );
+
+    for text in ["", "[00:00:00:05] edited", "unfinished draft"] {
+        app.annotation_text = text.into();
+        app.sync_annotations_from_text();
+        assert!(app.annotations_dirty, "edit must be tracked: {text:?}");
+        app.select(dir.path().join("other.wav"), false);
+        assert!(app.pending_selection.is_some());
+        assert_eq!(app.browser.selected.as_ref(), Some(&path));
+        app.cancel_pending_action();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let _ = ctx.run(input, |ctx| app.handle_close_request(ctx));
+        assert!(app.pending_close);
+        app.cancel_pending_action();
+    }
+    app.annotation_text = annotations::format_annotations(&original);
+    app.sync_annotations_from_text();
+    assert!(
+        !app.annotations_dirty,
+        "restoring the saved document is clean"
+    );
+    app.annotation_text.clear();
+    app.sync_annotations_from_text();
+    assert!(app.annotations.is_empty());
+    assert!(app.annotations_dirty);
+    app.save_annotations_to(path.clone());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while app.annotations_dirty && Instant::now() < deadline {
+        app.poll(&ctx);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        !app.annotations_dirty,
+        "save must complete: {:?}",
+        app.error
+    );
+    assert!(viewfrx_core::annotations::read(&path).unwrap().is_empty());
+    assert!(
+        !std::fs::read(&path)
+            .unwrap()
+            .windows(4)
+            .any(|bytes| bytes == b"FRXA")
+    );
+    assert_eq!(
+        viewfrx_core::decode::inspect(&path).unwrap().frames,
+        Some(800)
+    );
 }
 
 #[cfg(feature = "spectrogram")]

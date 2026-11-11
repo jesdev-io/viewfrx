@@ -462,7 +462,7 @@ impl App {
                             self.annotation_text =
                                 annotations::format_annotations(&self.annotations);
                         }
-                        self.annotations_dirty = self.annotations != self.saved_annotations;
+                        self.refresh_annotations_dirty();
                         self.info = Some(info);
                     }
                     Err(error) => {
@@ -619,7 +619,6 @@ impl App {
         }
         annotations::merge(&mut self.annotations, &new);
         if self.annotations != before {
-            self.annotations_dirty = self.annotations != self.saved_annotations;
             if sync_field && !new.is_empty() {
                 // Right-click rewrites the field sorted by ascending time
                 // (so deleted/redundant lines cannot resurrect) and records
@@ -640,6 +639,7 @@ impl App {
                 self.annotation_text = text;
                 self.annotation_cursor_char = Some(pos);
             }
+            self.refresh_annotations_dirty();
             crate::logln!(
                 "annotation added (floating, {} unsaved change(s))",
                 self.annotations
@@ -652,15 +652,20 @@ impl App {
     /// field immediately becomes a floating annotation (idempotent). The
     /// field itself is never rewritten while typing.
     fn sync_annotations_from_text(&mut self) {
-        // While editing, the text field is the source of truth: deleting a
-        // row removes its marker (and its plot line); parsing is all-or-
-        // nothing so a half-typed marker never corrupts the list.
-        if let Ok(parsed) = annotations::parse_text(&self.annotation_text)
-            && parsed != self.annotations
-        {
+        // Empty text is a valid empty document. Invalid intermediate text
+        // keeps the last valid markers, but is still an unsaved edit.
+        if let Ok(parsed) = annotations::parse_text(&self.annotation_text) {
             self.annotations = parsed;
-            self.annotations_dirty = self.annotations != self.saved_annotations;
         }
+        self.refresh_annotations_dirty();
+    }
+
+    /// One dirty-state rule for all edits, including deletion and invalid drafts.
+    /// Playback, analysis and other read-only operations do not alter this state.
+    fn refresh_annotations_dirty(&mut self) {
+        self.annotations_dirty = self.annotations != self.saved_annotations
+            || self.annotation_text.trim()
+                != annotations::format_annotations(&self.saved_annotations);
     }
     /// Open the standard save dialog (file naming + native overwrite warning)
     /// to intentionally persist the floating annotations.
@@ -690,6 +695,14 @@ impl App {
     }
     /// Persist the floating annotations to dst (in place when dst == source).
     fn save_annotations_to(&mut self, dst: PathBuf) {
+        // Validate the document before writing, including the empty document.
+        // Never silently save stale markers over an unfinished text edit.
+        if let Err(error) = annotations::parse_text(&self.annotation_text) {
+            self.error = Some(format!("Cannot save annotations: {error}"));
+            self.resume_selection = false;
+            return;
+        }
+        self.sync_annotations_from_text();
         let Some(src) = self.browser.selected.clone() else {
             return;
         };
