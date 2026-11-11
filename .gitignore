@@ -1,3 +1,4 @@
 /target/
 /.viewfrx/
 *.profraw
+.pi
