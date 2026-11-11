@@ -602,21 +602,15 @@ impl App {
                             - 2.0 * l::SPACE_MEDIUM)
                             .clamp(l::PLOT_MIN_HEIGHT, l::PLOT_MAX_HEIGHT);
                         // User-draggable plot heights (0 = initialize from layout).
-                        #[cfg(feature = "spectrogram")]
-                        let default_spec: f32 = if self.spectral.enabled {
-                            total_height * l::SPECTRAL_HEIGHT_FRACTION
-                        } else {
-                            0.0
-                        };
-                        #[cfg(not(feature = "spectrogram"))]
-                        let default_spec: f32 = 0.0;
-                        if self.spec_height <= 0.0 {
-                            self.spec_height = default_spec.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
-                        }
                         if self.wave_height <= 0.0 {
                             // Waveforms get less than half the plot area on startup.
                             self.wave_height = (total_height * l::WAVE_HEIGHT_FRACTION)
                                 .clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
+                        }
+                        // Initialize only when first shown, matching even a waveform
+                        // that was resized before spectrograms were enabled.
+                        if spectral_chrome > 0.0 && self.spec_height <= 0.0 {
+                            self.spec_height = self.wave_height;
                         }
                         let wave_height = self.wave_height.clamp(l::PLOT_HEIGHT_MIN, l::PLOT_MAX_HEIGHT);
                         #[cfg(feature = "spectrogram")]

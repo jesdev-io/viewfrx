@@ -106,8 +106,6 @@ pub mod layout {
     pub const SETTINGS_ITEM_GAP: f32 = 6.0;
     pub const PLOT_MIN_HEIGHT: f32 = 100.0;
     pub const PLOT_MAX_HEIGHT: f32 = 380.0;
-    #[cfg(feature = "spectrogram")]
-    pub const SPECTRAL_HEIGHT_FRACTION: f32 = 0.35;
     /// Default waveform share of the plot area on startup (less than half).
     pub const WAVE_HEIGHT_FRACTION: f32 = 0.45;
     /// All transport buttons share this size so they align on one height.
