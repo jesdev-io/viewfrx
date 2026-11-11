@@ -48,6 +48,8 @@ pub struct App {
     annotation_text: String,
     /// Selection waiting on the unsaved-annotations warning.
     pending_selection: Option<(PathBuf, bool)>,
+    pending_close: bool,
+    close_confirmed: bool,
     save_picker: Option<Receiver<Option<PathBuf>>>,
     /// Proceed to pending_selection after the save dialog completes.
     resume_selection: bool,
@@ -151,6 +153,8 @@ impl App {
             annotations_dirty: false,
             annotation_text: String::new(),
             pending_selection: None,
+            pending_close: false,
+            close_confirmed: false,
             save_picker: None,
             resume_selection: false,
             highpass: c::HIGHPASS_DEFAULT,
@@ -559,9 +563,11 @@ impl App {
                 }
                 Ok(None) => {
                     self.save_picker = None; // dialog cancelled: nothing saved
+                    self.resume_selection = false;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.save_picker = None;
+                    self.resume_selection = false;
                     self.error = Some("Save dialog closed unexpectedly.".into());
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
@@ -691,7 +697,32 @@ impl App {
             .files
             .save_annotations_as(src, dst, self.annotations.clone());
     }
+    fn handle_close_request(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.viewport().close_requested())
+            && self.annotations_dirty
+            && !self.close_confirmed
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending_close = true;
+            self.pending_selection = None;
+        }
+        if self.close_confirmed {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    fn cancel_pending_action(&mut self) {
+        self.pending_selection = None;
+        self.pending_close = false;
+        self.resume_selection = false;
+    }
+
     fn proceed_pending_selection(&mut self) {
+        if self.pending_close {
+            self.pending_close = false;
+            self.close_confirmed = true;
+            return;
+        }
         if let Some((path, audition)) = self.pending_selection.take() {
             self.select_now(path, audition);
         }
@@ -1018,6 +1049,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let started = Instant::now();
         self.poll(ctx);
+        self.handle_close_request(ctx);
         self.keyboard(ctx);
         let dropped = ctx.input(|i| {
             i.raw
@@ -1034,7 +1066,7 @@ impl eframe::App for App {
         self.browser_panel(ctx);
         self.settings(ctx);
         self.center(ctx);
-        if self.pending_selection.is_some() {
+        if self.pending_selection.is_some() || self.pending_close {
             let mut open = true;
             egui::Window::new("Unsaved annotations")
                 .collapsible(false)
@@ -1056,12 +1088,12 @@ impl eframe::App for App {
                             self.proceed_pending_selection();
                         }
                         if ui.button("Cancel").clicked() {
-                            self.pending_selection = None;
+                            self.cancel_pending_action();
                         }
                     });
                 });
             if !open {
-                self.pending_selection = None; // window X = cancel
+                self.cancel_pending_action(); // window X = cancel
             }
         }
         if self.about_open {

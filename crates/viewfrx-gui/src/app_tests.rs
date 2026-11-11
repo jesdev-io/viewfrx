@@ -17,6 +17,73 @@ fn test_app(ctx: &egui::Context, directory: &std::path::Path) -> (App, Receiver<
 }
 
 #[test]
+fn closing_with_unsaved_annotations_requires_confirmation() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    app.annotations_dirty = true;
+    let mut input = egui::RawInput::default();
+    input
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .events
+        .push(egui::ViewportEvent::Close);
+    let output = ctx.run(input, |ctx| app.handle_close_request(ctx));
+    assert!(app.pending_close);
+    assert!(!app.close_confirmed);
+    assert!(
+        output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .iter()
+            .any(|cmd| matches!(cmd, egui::ViewportCommand::CancelClose))
+    );
+
+    app.cancel_pending_action();
+    assert!(!app.pending_close);
+    assert!(app.annotations_dirty);
+    assert!(!app.close_confirmed);
+
+    // Save completion and Dismiss both use this continuation; merely opening
+    // or cancelling the save picker must not reach it.
+    app.pending_close = true;
+    app.annotations_dirty = false;
+    app.proceed_pending_selection();
+    assert!(app.close_confirmed);
+    let output = ctx.run(egui::RawInput::default(), |ctx| {
+        app.handle_close_request(ctx)
+    });
+    assert!(
+        output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .iter()
+            .any(|cmd| matches!(cmd, egui::ViewportCommand::Close))
+    );
+}
+
+#[test]
+fn closing_without_unsaved_annotations_is_not_cancelled() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = egui::Context::default();
+    let (mut app, _rx) = test_app(&ctx, dir.path());
+    let mut input = egui::RawInput::default();
+    input
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .events
+        .push(egui::ViewportEvent::Close);
+    let output = ctx.run(input, |ctx| app.handle_close_request(ctx));
+    assert!(!app.pending_close);
+    assert!(
+        !output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .iter()
+            .any(|cmd| matches!(cmd, egui::ViewportCommand::CancelClose))
+    );
+}
+
+#[test]
 fn keyboard_and_seek_use_the_same_transport_commands_as_cli() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = egui::Context::default();
