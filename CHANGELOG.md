@@ -2,6 +2,12 @@
 
 All notable changes to viewfrx. Versions follow SemVer; releases are tagged `v*` and published by CI with per-platform binaries (Linux/Windows/macOS) plus source.
 
+## [0.2.0] - 2026-11-12
+
+- Improve unsaved-annotation tracking, including deletions, empty drafts, and exit warnings.
+- Polish the GUI layout: initialize spectrograms consistently with waveforms and prioritize nominal octave labels as the spectrum is resized.
+- Refresh the README and documentation structure, including updated imagery and clearer project guidance.
+
 ## [0.1.4] - 2026-11-07
 
 - Ensure Windows portable releases are packaged as `.zip` archives with matching README instructions.
