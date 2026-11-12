@@ -10,178 +10,37 @@
   <img src="crates/viewfrx-gui/assets/viewfrx-logo.png" alt="viewfrx logo" width="430">
 </p>
 
-A compact, CLI-first Rust audio browser with a **native desktop GUI**.
+**Find the right sound. Keep your flow.**
 
-Browse local recordings in place, inspect metadata, audition WAV/MP3, seek, normalize peaks, change gain/rate, generate cached waveform/spectrogram overviews and annotate audio data directly inside the file, completely stateless.
+A compact audio browser for field recordings, foley, and folders full of sounds. Browse in place, see the waveform, and jump straight to the moment you want—without importing everything into a library. Built in Rust, with a native desktop app and a CLI.
 
-![demo](docs/assets/demo.png)
+## [⬇ Downloads — Linux · Windows · macOS](https://github.com/jesdev-io/viewfrx/releases/latest)
 
-## Build
+Get an installer or portable archive from the **[latest release](https://github.com/jesdev-io/viewfrx/releases/latest)**. No Rust toolchain required. See the [installation guide](docs/installation.md) for package choices, platform requirements, and building from source.
 
-Rust 1.89+ is declared. GitHub Actions builds and tests on Linux, Windows, and macOS; device/driver behavior can still vary by platform.
+Windows and macOS installers are currently unsigned and may show security warnings.
 
-```sh
-# Debian/Ubuntu native build dependencies
-sudo apt install build-essential pkg-config libasound2-dev
-cargo build --release --locked
-./target/release/viewfrx --help
-```
-
-The CLI binary is `target/release/viewfrx` (`viewfrx.exe` on Windows). Plain `cargo build`/`cargo run` still target the CLI only; build the whole workspace or select the GUI explicitly. Python and FFmpeg are optional test tools, not application runtime dependencies.
-
-## Install a release (no Rust/toolchain required)
-
-Download the archive for your operating system from the [Releases page](../../releases):
-
-- Linux: `viewfrx-ubuntu-latest.tar.gz`
-- macOS: `viewfrx-macos-latest.tar.gz`
-- Windows: `viewfrx-windows-latest.zip`
-
-Archives contain the `viewfrx` CLI, `viewfrx-gui` desktop app, this README, and the license. Extract the archive and run the binary directly (on Linux, the GUI requires system OpenGL/X11 or Wayland libraries and desktop portal support for file dialogs). Releases also include a Linux `.deb` (Debian/Ubuntu) and AppImage, a Windows `.msi`, and a macOS `.dmg`. The `.deb` declares its ALSA runtime dependency; graphics, desktop portal, and audio-device libraries still come from the host system. The MSI and DMG are currently unsigned, so Windows/macOS may show security warnings; signing/notarization can be added when credentials are available. Verify downloads with `SHA256SUMS` when available. Releases are built by GitHub Actions for Linux, Windows, and macOS; source archives are also attached automatically.
-
-## Desktop app
-
-```sh
-cargo run --release -p viewfrx-gui --features spectrogram -- /path/to/recordings
-# Or build both binaries with spectral analysis enabled:
-cargo build --release --workspace --features spectrogram --locked
-./target/release/viewfrx-gui
-```
-
-- **Left:** virtualized, filterable file list, recursive browsing and optional audition-on-selection. Use the **File** menu (Import files/folder, Refresh), drag-and-drop, or startup paths to import. First selection on startup does not auto-play.
-- **Center:** metadata cards (including the DC offset in dBFS), waveforms first (DC-removed, with a subdued −1 dBFS normalized overlay), then optional source spectrogram(s), click/drag seeking, right-click timestamp markers, symbol transport buttons (▶ play, ❚❚ pause, ■ stop, ⏮/⏭ browse), and a bottom area split into two columns — annotations on the left, the live spectrum on the right — with a vertical resize bar between them.
-- **Stereo views:** waveform and spectrogram each get a **Left / Right / Both** selector and are grouped as WAVE L, WAVE R, SPEC L, SPEC R (stereo recordings only).
-- **Resizable/zoomable plots:** drag a plot's bottom edge to resize it; zoom with the −/+ buttons or the scroll wheel over a plot. Scroll zoom keeps the timestamp under the pointer at the same horizontal position; all waveforms and spectrograms share the zoom window, and seeking/playhead/markers/time readout follow it. Double-click a plot rewinds and resets the zoom.
-- **Live spectrum:** a toggleable magnitude-spectrum column at the bottom right of the center area (log-frequency 1/3-octave grid, height-adaptive dB grid, highpass response curve when enabled), recomputed at the playhead while playing; the vertical bar between it and the annotation column redistributes their widths.
-- **Right:** output device, gain in dB, Normalize, pitch-changing rate, fixed highpass toggle, vertical stereo RMS/peak meters in dBFS, FFT size and spectral display floor, and a debug-console toggle.
-- **Top bar:** File / Playback / View menus export the main CLI-equivalent actions.
-- **Annotations:** type `[hh:mm:ss:cc] note` (cc = centiseconds) in the bottom field (Enter) or right-click a plot at a position; markers render as vertical lines and in the field and are idempotent. They stay **floating** until you save with **Ctrl+S** or **File → Save annotations**, which opens a standard save dialog (naming + overwrite warning) and writes them into the file's own metadata (WAV LIST/INFO, MP3 ID3v2) — the file stays a normal playable audio file. Switching files with unsaved annotations warns first (Save / Dismiss / Cancel).
-- **Double-click to reset:** gain returns to 0 dB/unity and unmutes; rate to 1×; toggles, device and spectral settings to their defaults. Double-click a plot to rewind.
-- **Keys:** Space play/pause; Up/Down browse visible results; Left/Right seek five seconds; Esc stop. Shortcuts do not intercept text entry.
-- **JESDEV-inspired theme:** dark compact panels, amber waveform/actions, purple playhead, teal annotation markers; custom viewfrx logo and gradient app icon from the included Draw.io sources.
-
-Sessions are stateless: opening files/folders replaces the current roots, Refresh rescans them, and nothing is restored on restart. Analysis caches are temporary by default. `--cache DIR` explicitly retains analysis artifacts for diagnostics; deprecated `--library` is ignored. Overlapping roots are deduplicated and displayed candidates are capped at 100,000, with an explicit warning. Device switches stop playback. Output failure does not prevent browsing or analysis. `--muted` starts at gain zero.
-
-On Linux the GUI uses egui/eframe with OpenGL and X11/Wayland runtime libraries; file dialogs use the desktop portal (`xdg-desktop-portal` plus a desktop-specific backend). Drag-and-drop and startup paths remain alternatives if a desktop portal is unavailable. Windows/macOS builds run in CI, but their runtime audio behavior and native dialogs have not yet been qualified.
-
-The `spectrogram` Cargo feature is optional; omit it for a waveform-only build. Feature builds can show the spectrogram (off by default; enable via the settings toggle or `--spectrogram`). See [GUI design, tests and limitations](docs/gui.md) and [level/normalization/spectral conventions](docs/analysis.md).
-
-![Native spectrogram and normalized waveform preview](docs/assets/analysis.png)
+![viewfrx desktop: audio browser, waveforms, and playback controls](docs/assets/demo.png)
 
 ## Quick start
 
-```sh
-# Import validates and prints canonical roots; it does not persist a library.
-./target/release/viewfrx import /path/to/recordings
-./target/release/viewfrx list --recursive
+1. **Install and open viewfrx** (or extract a portable archive and launch `viewfrx-gui`).
+2. **Drop in files or a folder**, or choose **File → Import files/folder**. WAV and MP3 are tested.
+3. **Select a recording and press Space** to play or pause. Click the waveform to seek; use Up/Down to browse and Left/Right to jump five seconds.
+4. **Mark what matters.** Right-click a plot to add a timestamp note. Press **Ctrl+S** to save annotations into the audio file’s metadata; nothing is written until you save.
 
-# You can also browse/play without importing first.
-./target/release/viewfrx list /path/to/recordings --recursive
-./target/release/viewfrx inspect '/path/to/recording.wav'
-./target/release/viewfrx devices
-./target/release/viewfrx play '/path/to/recording.wav' --gain 0.5
-./target/release/viewfrx play '/path/to/recording.mp3' --rate 1.5 --seconds 10
-./target/release/viewfrx waveform '/path/to/recording.wav'
-./target/release/viewfrx normalization '/path/to/recording.wav'
-./target/release/viewfrx play '/path/to/recording.wav' --normalize --gain-db -6
-./target/release/viewfrx play '/path/to/recording.wav' --highpass
-./target/release/viewfrx spectrogram '/path/to/recording.wav' --fft-size 2048
-./target/release/viewfrx levels '/path/to/recording.wav'
-./target/release/viewfrx waveform '/path/to/recording.wav' --stereo
-./target/release/viewfrx annotate '/path/to/recording.wav' '[00:00:12:00] thunder'
-./target/release/viewfrx annotate '/path/to/recording.wav' --seconds 42 'clap'
-./target/release/viewfrx annotate '/path/to/recording.wav' --output '/path/copy.wav' '[00:00:12:00] thunder'
-./target/release/viewfrx annotations '/path/to/recording.wav'
-./target/release/viewfrx spectrum '/path/to/recording.wav' --position 12.5
-./target/release/viewfrx spectrum '/path/to/recording.wav' --third-octave  # log-frequency 1/3-octave bands
-./target/release/viewfrx waveform '/path/to/recording.wav' --from 10 --to 20
-```
+No catalog to manage: opening files or folders replaces the current session, and preferences are not restored on restart.
 
-- Results are JSON; `list` emits one JSON object per file. Application errors go to stderr with a nonzero exit code; Clap usage errors use its standard text output.
-- Listing filters by extension; `inspect` and `play` validate the codec/container. Nested directories require `--recursive`; `--sort` enables alphabetical order within each directory. Directory symlinks are not followed. Overlapping imported roots can yield duplicate listing entries.
-- `list` without a path browses the working directory, never a saved library. `import` only validates/emits roots; it does not retain them.
-- Waveforms use an automatically removed temporary cache; explicitly retain artifacts with `waveform --cache DIR`. `--bins` accepts powers of two from 2 to 65536. The cache budget is 64 MiB and eviction only touches viewfrx-owned entries.
-- Manual gain accepts linear `--gain` (0–4, 1 is unity) or `--gain-db`. Output is clamped to [-1, 1] and clipped samples are counted.
-- `--normalize` applies linked-channel sample-peak gain to reach −1 dBFS **before manual gain**, computed on the **DC-removed** signal. It preserves stereo balance and leaves silence unchanged. This is not loudness/true-peak normalization. The CLI computes or loads peak analysis before starting; the GUI waits without blocking its event loop and never starts normalized playback at an unanalysed gain.
-- Playback always removes DC offset with a one-pole DC blocker and applies a short onset/offset fade (anti dirac-pop). `--highpass` additionally enables a fixed 20 Hz highpass against infra-sound. `levels` reports the per-channel DC offset in linear and dBFS, raw and DC-removed peaks, and the normalization. `benchmark --highpass` applies the same chain.
-- `waveform --channel N` / `--stereo` select per-channel overviews; `spectrogram --channel N` / `--stereo` do the same for spectral analysis.
-- `annotate` merges `[hh:mm:ss:cc]` markers (or `--seconds`) into the file's own metadata (WAV LIST INFO / MP3 ID3v2) atomically, without altering the audio data; identical annotations are never duplicated. `--output DST` saves an annotated copy instead of modifying the source (the GUI save-dialog equivalent). `annotations` lists them. Both are also session ops. In the GUI, markers are floating until saved via Ctrl+S / the File menu; switching files with unsaved markers warns first.
-- `spectrum` (feature `spectrogram`) returns one calibrated magnitude spectrum in dBFS at `--position`; `waveform`/`spectrogram` accept `--from/--to` zoom windows. Global `--verbose` pipes console log lines to stderr as JSON (headless counterpart of the GUI debug console).
-- `spectrogram` requires its Cargo feature. The CLI returns the same calibrated, bounded STFT overview used by the GUI; its separate 64 MiB cache is temporary unless `--cache DIR` is supplied.
-- Rate is 0.25–4 and **changes pitch**. Linear interpolation is a preview implementation, not antialiased resampling or pitch-preserving time stretching.
-- Use `--device INDEX` on `play` or `session` to choose an output. Indices come from `devices` and may change when hardware changes. The device's default sample rate/channel count is used; a small supported output buffer is requested.
+## What you can do
 
-## Persistent control session
+- **Browse without the baggage.** Filter a virtualized file list, explore folders recursively, and optionally audition on selection.
+- **See the sound.** Inspect metadata, stereo waveforms, a live spectrum, and optional spectrograms with linked zoom and seeking.
+- **Audition with control.** Adjust gain and playback rate, toggle peak normalization or a highpass filter, and choose your output device. Rate changes also change pitch.
+- **Keep notes with the recording.** Timestamp annotations save inside WAV/MP3 metadata—no sidecar database, and the audio stays playable in other apps.
+- **Use the terminal, too.** The included `viewfrx` CLI handles browsing, playback, analysis, and annotations, with a control session for automation. See the [CLI guide](docs/cli.md).
 
-```sh
-./target/release/viewfrx session
-```
+## Learn more
 
-Reads one JSON object per line from stdin and replies with one JSON object per line on stdout. Paths containing spaces need only normal JSON quoting. Send these interactively or from a process controlling stdin/stdout:
+**[Documentation](docs/README.md)** · [Desktop guide](docs/desktop-guide.md) · [CLI guide](docs/cli.md) · [Changelog](CHANGELOG.md) · [Known limitations](docs/limitations.md)
 
-```json
-{"op":"play","path":"/path/to/recording.wav"}
-{"op":"status"}
-{"op":"seek","seconds":12.5}
-{"op":"rate","value":1.5}
-{"op":"gain","value":0.5}
-{"op":"pause"}
-{"op":"resume"}
-{"op":"stop"}
-{"op":"highpass","enabled":true}
-{"op":"annotate","path":"/path/to/recording.wav","text":"[00:00:12:00] thunder"}
-{"op":"annotations","path":"/path/to/recording.wav"}
-{"op":"quit"}
-```
-
-The initial reply is `{"event":"ready","protocol":1}`. Transport commands acknowledge **acceptance, not completion**. Poll `status` to observe errors, position, and state. `generation` changes as the worker applies play/seek/rate/stop; `rendered_generation` changes when frames from that generation reach the output callback. It is not DAC/audible latency. Consecutive queued play/seek commands may coalesce. Pause and gain apply immediately; changing selection preserves pause.
-
-Use `normalization PATH` to obtain the actual DC-removed source peak, then send `{"op":"play_normalized","path":"/path/to/recording.wav","peak":0.5}` with that measured peak (0.5 here is only an example). For the current file, `{"op":"normalize","path":"/path/to/recording.wav","peak":0.5}` changes normalization without a seek; `"peak":null` disables it. The path guard rejects stale analysis for a different recording. Ordinary `play` resets normalization. Manual/session `gain` remains linear for compatibility; status additionally reports gain in dB, normalization gain, the highpass state and per-channel RMS/peak dBFS (`null` for zero).
-
-A missing/corrupt file produces an asynchronous error in status; a later successful play clears it. Device stream failures require reopening the session. Invalid commands produce an error reply without ending the session. Requests are limited to 64 KiB. EOF or `quit` stops the engine; **piping play then immediately quit does not wait for playback**. Use the one-shot `play` command for that.
-
-## Architecture
-
-| Crate | Responsibility |
-|---|---|
-| `viewfrx-core` | Discovery, decoding/metadata, level conventions, waveform and optional spectral caches |
-| `viewfrx-audio` | Typed transport, deterministic renderer, decoder worker, CPAL callback |
-| `viewfrx-cli` | Clap and JSON-lines adapters |
-| `viewfrx-gui` | egui views, background adapters, generation-aware browser/analysis state |
-
-Audio streams through an 8192-frame SPSC ring. Decoding, resampling, file opening, and seeking run on a worker; the callback does no disk I/O, decoding, allocation, logging, or mutex locking. Old-generation frames are discarded after seek/switch. Whole recordings are not loaded into memory.
-
-See [architecture](docs/architecture.md), [references and branding](docs/references.md), and [remaining work](docs/roadmap.md). `goal.md` is the user-maintained brief and is never edited by implementation work. Production tuning constants live in each crate's `src/config.rs`; GUI colors live in `theme.rs`.
-
-## CI and releases
-
-GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs formatting, clippy, tests, and release builds on **Linux, Windows, and macOS** for pushes and pull requests to `main`/`dev`. A `v*` tag publishes portable binaries plus Linux `.deb`/AppImage, Windows MSI, and macOS DMG installers; GitHub also attaches source archives. Installer signing/notarization is not configured yet. See [CHANGELOG.md](CHANGELOG.md). The `dev` branch is the integration branch; `main` tracks releases.
-
-## Test and measure
-
-```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --features spectrogram --locked -- -D warnings
-cargo test --workspace --features spectrogram --locked
-cargo test --workspace --no-default-features --locked
-cargo build --release --workspace --features spectrogram --locked
-./target/release/viewfrx benchmark '/path/to/recording.wav'
-python3 scripts/check-performance.py
-python3 scripts/check-performance.py --audio --spectrogram  # MUTED real-device smoke test
-python3 scripts/check-gui.py --expect-spectrogram --demo --screenshot /tmp/viewfrx.png  # needs a display
-```
-
-Unit/integration tests do not require an audio device. WAV fixtures are generated in temporary directories; the tiny synthetic MP3 fixture is committed with its generation command. The performance script generates 60-second and 600-second WAVs and 10,000 directory entries, then removes them. FFmpeg is optional and enables an additional generated MP3 benchmark. The optional device test uses POSIX pipe polling, gain zero, and never deliberately plays the synthetic tone audibly.
-
-[Measured baseline and caveats](docs/performance.md). These tests establish a foundation—not proof that every codec, driver, or slow filesystem is glitch-free.
-
-## Current limitations
-
-- Preferences are intentionally not persisted between sessions. The meter has a 300 ms exponential RMS envelope and decaying sample peaks; it is VU-style, **not an IEC-calibrated VU instrument**. Annotation metadata writing supports WAV and MP3; other formats report a clear error and are left untouched.
-- Spectrograms are bounded, linearly spaced frequency overviews with maximum aggregation, not a zoomable analysis editor or power spectral density measurement.
-- Playback supports mono/stereo; multichannel metadata/waveforms work, but auditioning >2 channels is rejected. Extra device channels are silent.
-- WAV and MP3 are tested. Other Symphonia-enabled formats may work but are not yet qualified. A truncated stream ending at a valid packet boundary may look like normal EOF; this is not an audio-file integrity checker.
-- Current-file read-ahead and a bounded overview cache exist. Next-file preloading and progressive multiresolution waveforms remain work.
-- GUI discovery/analysis run on separate workers with cooperative cancellation and stale-result rejection. OS file reads, directory enumeration/sorting and device opening cannot be interrupted; a newer request may wait for one already in progress, but not on the UI thread. CLI analysis remains an explicit job.
-- Cache identity uses path/size/mtime, not a full content hash. If files change while preserving both size and mtime, delete their cached analyses.
-- Tagged releases provide portable archives plus Linux `.deb`/AppImage, Windows MSI, and macOS DMG packages. Windows and macOS packages are currently unsigned; Linux runtime graphics, desktop portal, and audio-driver libraries remain host-provided. Dependency/security audits and application licensing remain open work.
+> **Agents: start here.** Read the [project brief](goal.md) (owner-maintained; do not edit), [architecture contracts](docs/architecture.md), [DSP and level conventions](docs/analysis.md), and [GUI design and test boundaries](docs/gui.md). Use the [development guide](docs/development.md) for testing and release rules; check the [roadmap](docs/roadmap.md) before treating planned work as implemented.
