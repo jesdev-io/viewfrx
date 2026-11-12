@@ -12,7 +12,9 @@
 
 A compact, CLI-first Rust audio browser with a **native desktop GUI**.
 
-Browse local recordings in place, inspect metadata, audition WAV/MP3, seek, normalize peaks, change gain/rate, and generate cached waveform/spectrogram overviews. Playback and analysis do not modify audio; saving annotations updates only file metadata. Both interfaces use the same core and audio APIs.
+Browse local recordings in place, inspect metadata, audition WAV/MP3, seek, normalize peaks, change gain/rate, generate cached waveform/spectrogram overviews and annotate audio data directly inside the file, completely stateless.
+
+![demo](docs/assets/demo.png)
 
 ## Build
 
