@@ -185,7 +185,7 @@ impl View {
                     "SPECTROGRAM · dBFS"
                 })
                 .size(l::SMALL_FONT)
-                .color(theme::MUTED),
+                .color(theme::color(ui, theme::MUTED)),
             );
             if self.pending {
                 ui.spinner();
@@ -194,7 +194,7 @@ impl View {
         let (rect, response) =
             ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, l::PLOT_RADIUS, theme::PANEL);
+        painter.rect_filled(rect, l::PLOT_RADIUS, theme::color(ui, theme::PANEL));
         if let Some(texture) = if channel == 0 {
             &self.texture
         } else {
@@ -240,7 +240,7 @@ impl View {
                     "No spectral data"
                 },
                 egui::FontId::proportional(l::BODY_FONT),
-                theme::MUTED,
+                theme::color(ui, theme::MUTED),
             );
         }
         widgets::annotation_lines(&painter, rect, overlays.annotations, window);

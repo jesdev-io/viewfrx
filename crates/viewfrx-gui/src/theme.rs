@@ -35,11 +35,42 @@ pub fn apply(ctx: &egui::Context) {
     visuals.widgets.active.bg_fill = SELECTED;
     visuals.widgets.hovered.bg_fill = RAISED;
     visuals.widgets.hovered.bg_stroke = egui::Stroke::new(l::THIN_STROKE, AMBER);
-    ctx.set_visuals(visuals);
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = l::ITEM_SPACING.into();
-    style.spacing.button_padding = l::BUTTON_PADDING.into();
-    ctx.set_style(style);
+    ctx.set_visuals_of(egui::Theme::Dark, visuals);
+    ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
+    for mode in [egui::Theme::Dark, egui::Theme::Light] {
+        ctx.style_mut_of(mode, |style| {
+            style.spacing.item_spacing = l::ITEM_SPACING.into();
+            style.spacing.button_padding = l::BUTTON_PADDING.into();
+        });
+    }
+    ctx.set_theme(egui::ThemePreference::System);
+}
+
+/// Adapt custom-painted UI to egui's resolved theme. Spectrogram heatmaps keep
+/// their fixed scientific color scale; all chrome and plot ink follow the UI.
+pub fn color(ui: &egui::Ui, dark: Color32) -> Color32 {
+    color_for(ui.visuals(), dark)
+}
+
+pub fn color_for(visuals: &egui::Visuals, dark: Color32) -> Color32 {
+    if visuals.dark_mode {
+        return dark;
+    }
+    match dark {
+        BG => Color32::from_rgb(242, 244, 248),
+        PANEL => visuals.panel_fill,
+        RAISED => Color32::from_rgb(213, 218, 228),
+        TEXT => visuals.text_color(),
+        MUTED => Color32::from_rgb(80, 88, 104),
+        AMBER => Color32::from_rgb(154, 96, 0),
+        PURPLE => Color32::from_rgb(112, 58, 168),
+        ANNOTATION => Color32::from_rgb(0, 113, 119),
+        NORMALIZED_WAVE => Color32::from_rgb(164, 175, 198),
+        METER_GREEN => Color32::from_rgb(24, 133, 86),
+        ALERT => Color32::from_rgb(187, 52, 32),
+        SELECTED => Color32::from_rgb(255, 226, 164),
+        _ => dark,
+    }
 }
 
 pub fn logo() -> image::RgbaImage {

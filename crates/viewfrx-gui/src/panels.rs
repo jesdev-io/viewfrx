@@ -20,7 +20,7 @@ impl App {
         egui::TopBottomPanel::top("header")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG)
+                    .fill(theme::color_for(&ctx.style().visuals, theme::BG))
                     .inner_margin(l::HEADER_PADDING),
             )
             .show(ctx, |ui| {
@@ -91,6 +91,10 @@ impl App {
                             }
                         });
                         ui.menu_button("View", |ui| {
+                            ui.menu_button("Theme", |ui| {
+                                egui::widgets::global_theme_preference_buttons(ui);
+                            });
+                            ui.separator();
                             ui.selectable_value(
                                 &mut self.wave_channels,
                                 widgets::Channels::Both,
@@ -141,7 +145,7 @@ impl App {
                 .or_else(|| self.snapshot.status.as_ref().and_then(|s| s.error.as_ref()));
             if let Some(error) = error {
                 ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(theme::ALERT, error);
+                    ui.colored_label(theme::color(ui, theme::ALERT), error);
                 });
                 if self.error.is_some() && ui.small_button("Dismiss").clicked() {
                     self.error = None;
@@ -152,7 +156,7 @@ impl App {
                     RichText::new(
                         "Space: play/pause    Up/Down: browse    Left/Right: seek    Esc: stop",
                     )
-                    .color(theme::MUTED),
+                    .color(theme::color(ui, theme::MUTED)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.snapshot.opening {
@@ -225,7 +229,7 @@ impl App {
                     ui.label("Drop audio files or folders here.");
                     ui.label(
                         RichText::new("Imported files remain as-is during browsing and listening.")
-                            .color(theme::MUTED),
+                            .color(theme::color(ui, theme::MUTED)),
                     );
                 } else if self.browser.visible.is_empty() && !self.scanning {
                     ui.label("No matching files.");
@@ -376,7 +380,7 @@ impl App {
         if rate.drag_stopped() || (rate.changed() && !rate.dragged()) {
             self.send(Command::Rate { value: self.rate });
         }
-        ui.small(RichText::new("Rate changes pitch.").color(theme::MUTED));
+        ui.small(RichText::new("Rate changes pitch.").color(theme::color(ui, theme::MUTED)));
         if widgets::reset_toggle(ui, &mut self.highpass, false, "20 Hz Highpass").changed() {
             self.send(Command::Highpass {
                 enabled: self.highpass,
@@ -386,7 +390,7 @@ impl App {
             RichText::new(
                 "Fixed highpass attenuates frequencies below 20 Hz; DC offset is always removed.",
             )
-            .color(theme::MUTED),
+            .color(theme::color(ui, theme::MUTED)),
         );
         ui.separator();
         ui.label("STEREO LEVEL · dBFS");
@@ -396,7 +400,7 @@ impl App {
                 "RMS {:.0} ms · peak markers",
                 RMS_TIME_CONSTANT_SECONDS * 1000.0
             ))
-            .color(theme::MUTED),
+            .color(theme::color(ui, theme::MUTED)),
         );
         if let Some(status) = &self.snapshot.status {
             ui.small(format!(
@@ -423,7 +427,10 @@ impl App {
                     if self.spectrum_on { "on" } else { "off" }
                 );
             }
-            ui.small(RichText::new("Magnitude spectrum at the playhead.").color(theme::MUTED));
+            ui.small(
+                RichText::new("Magnitude spectrum at the playhead.")
+                    .color(theme::color(ui, theme::MUTED)),
+            );
             if self.spectral.controls(ui)
                 && let Some(path) = self.browser.selected.clone()
             {
@@ -451,13 +458,15 @@ impl App {
                 }
             );
         }
-        ui.small(RichText::new("Open the program's debug window.").color(theme::MUTED));
+        ui.small(
+            RichText::new("Open the program's debug window.").color(theme::color(ui, theme::MUTED)),
+        );
     }
     pub(super) fn center(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG)
+                    .fill(theme::color_for(&ctx.style().visuals, theme::BG))
                     .inner_margin(l::CENTRAL_PADDING),
             )
             .show(ctx, |ui| {
@@ -468,7 +477,7 @@ impl App {
                         ui.add_space(l::SPACE_SECTION);
                         ui.heading("A lightning fast audio file browser");
                         ui.label(
-                            RichText::new("Import audio. Browse. Listen. See.").color(theme::MUTED),
+                            RichText::new("Import audio. Browse. Listen. See.").color(theme::color(ui, theme::MUTED)),
                         );
                         ui.add_space(l::SPACE_LARGE);
                         if ui.button("Open audio folder").clicked() && self.picker.is_none() {
@@ -485,7 +494,7 @@ impl App {
                         ui.label(
                             RichText::new("SELECTED RECORDING")
                                 .size(l::MICRO_FONT)
-                                .color(theme::AMBER),
+                                .color(theme::color(ui, theme::AMBER)),
                         );
                         ui.heading(path.file_name().unwrap_or_default().to_string_lossy())
                             .on_hover_text(path.display().to_string());
@@ -493,7 +502,7 @@ impl App {
                             egui::Label::new(
                                 RichText::new(path.display().to_string())
                                     .size(l::SMALL_FONT)
-                                    .color(theme::MUTED),
+                                    .color(theme::color(ui, theme::MUTED)),
                             )
                             .truncate(),
                         );
@@ -529,14 +538,14 @@ impl App {
                                     ("DC OFFSET", format!("{dc} dBFS")),
                                 ] {
                                     egui::Frame::new()
-                                        .fill(theme::PANEL)
+                                        .fill(theme::color(ui, theme::PANEL))
                                         .inner_margin(l::CARD_PADDING)
                                         .corner_radius(l::CARD_RADIUS)
                                         .show(ui, |ui| {
                                             ui.label(
                                                 RichText::new(label)
                                                     .size(l::MICRO_FONT)
-                                                    .color(theme::MUTED),
+                                                    .color(theme::color(ui, theme::MUTED)),
                                             );
                                             ui.label(RichText::new(value).strong());
                                         });
@@ -623,7 +632,7 @@ impl App {
                             ui.label(
                                 RichText::new("ORIGINAL (DC-REMOVED)")
                                     .size(l::SMALL_FONT)
-                                    .color(theme::AMBER),
+                                    .color(theme::color(ui, theme::AMBER)),
                             )
                             .on_hover_text("Playback removes the DC offset; it is listed as a file parameter in dBFS.");
                             ui.label(
@@ -631,7 +640,7 @@ impl App {
                                     "AUTO-SCALED TO {NORMALIZE_TARGET_DBFS:.0} dBFS"
                                 ))
                                 .size(l::SMALL_FONT)
-                                .color(theme::NORMALIZED_WAVE),
+                                .color(theme::color(ui, theme::NORMALIZED_WAVE)),
                             );
                             if self.analyzing {
                                 ui.spinner();
@@ -664,7 +673,7 @@ impl App {
                                                 "zoom {:.3}–{:.3} s",
                                                 window.start, window.end
                                             ))
-                                            .color(theme::MUTED),
+                                            .color(theme::color(ui, theme::MUTED)),
                                         );
                                     }
                                 },
@@ -790,7 +799,7 @@ impl App {
                             RichText::new(
                                 "Click/drag to seek. Right-click a plot to add a timestamp marker. Double-click a plot to rewind.",
                             )
-                            .color(theme::MUTED),
+                            .color(theme::color(ui, theme::MUTED)),
                         );
                         ui.add_space(l::SPACE_SMALL);
                         // Bottom area: two columns — annotations on the left,
@@ -847,7 +856,7 @@ impl App {
     /// Annotation column/row: the [hh:mm:ss:cc] free-text field.
     pub(super) fn annotation_panel(&mut self, ui: &mut egui::Ui, width: f32, height: f32) {
         egui::Frame::new()
-            .fill(theme::PANEL)
+            .fill(theme::color(ui, theme::PANEL))
             .inner_margin(l::CARD_PADDING)
             .corner_radius(l::CARD_RADIUS)
             .show(ui, |ui| {
@@ -857,7 +866,7 @@ impl App {
                 ui.label(
                     RichText::new("ANNOTATIONS")
                         .size(l::MICRO_FONT)
-                        .color(theme::ANNOTATION),
+                        .color(theme::color(ui, theme::ANNOTATION)),
                 );
                 // Multiline: each [hh:mm:ss:cc] timestamp gets its own text row,
                 // and newlines render as real line breaks (no replacement glyph).
@@ -903,7 +912,7 @@ impl App {
     #[cfg(feature = "spectrogram")]
     fn spectrum_panel(&mut self, ui: &mut egui::Ui, width: f32, height: f32) {
         egui::Frame::new()
-            .fill(theme::PANEL)
+            .fill(theme::color(ui, theme::PANEL))
             .inner_margin(l::CARD_PADDING)
             .corner_radius(l::CARD_RADIUS)
             .show(ui, |ui| {

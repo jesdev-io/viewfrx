@@ -1122,12 +1122,12 @@ impl eframe::App for App {
                         ui.label(RichText::new("viewfrx").size(l::BRAND_FONT).strong());
                         ui.label(
                             RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                                .color(theme::AMBER),
+                                .color(theme::color(ui, theme::AMBER)),
                         );
                     });
                     ui.label(
                         RichText::new("/ JESDEV theme")
-                            .color(theme::MUTED)
+                            .color(theme::color(ui, theme::MUTED))
                             .size(l::SMALL_FONT),
                     );
                     ui.add_space(l::SPACE_SMALL);
@@ -1149,7 +1149,7 @@ impl eframe::App for App {
                     );
                     ui.label(
                         RichText::new("Logo/theme: JESDEV (bundled with provenance).")
-                            .color(theme::MUTED)
+                            .color(theme::color(ui, theme::MUTED))
                             .size(l::SMALL_FONT),
                     );
                 });

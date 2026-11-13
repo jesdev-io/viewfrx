@@ -16,6 +16,67 @@ fn test_app(ctx: &egui::Context, directory: &std::path::Path) -> (App, Receiver<
     (App::with_audio(ctx, args, audio), rx)
 }
 
+#[test]
+fn themes_follow_system_and_allow_session_local_overrides() {
+    let ctx = egui::Context::default();
+    theme::apply(&ctx);
+    assert_eq!(
+        ctx.options(|o| o.theme_preference),
+        egui::ThemePreference::System
+    );
+    for (preference, system, expected) in [
+        (
+            egui::ThemePreference::System,
+            egui::Theme::Light,
+            egui::Theme::Light,
+        ),
+        (
+            egui::ThemePreference::System,
+            egui::Theme::Dark,
+            egui::Theme::Dark,
+        ),
+        (
+            egui::ThemePreference::Light,
+            egui::Theme::Dark,
+            egui::Theme::Light,
+        ),
+        (
+            egui::ThemePreference::Dark,
+            egui::Theme::Light,
+            egui::Theme::Dark,
+        ),
+        (
+            egui::ThemePreference::System,
+            egui::Theme::Light,
+            egui::Theme::Light,
+        ),
+    ] {
+        ctx.set_theme(preference);
+        let _ = ctx.run(
+            egui::RawInput {
+                system_theme: Some(system),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    assert_eq!(ui.visuals().dark_mode, expected == egui::Theme::Dark);
+                    assert_eq!(theme::color(ui, theme::PANEL), ui.visuals().panel_fill);
+                    if expected == egui::Theme::Light {
+                        assert_ne!(theme::color(ui, theme::BG), theme::BG);
+                        assert_ne!(theme::color(ui, theme::TEXT), theme::TEXT);
+                    }
+                });
+            },
+        );
+    }
+    // A new app session always follows the system again, without storage.
+    theme::apply(&ctx);
+    assert_eq!(
+        ctx.options(|o| o.theme_preference),
+        egui::ThemePreference::System
+    );
+}
+
 #[cfg(feature = "spectrogram")]
 #[test]
 fn spectrum_title_is_rotated_and_reserves_its_thickness_only() {

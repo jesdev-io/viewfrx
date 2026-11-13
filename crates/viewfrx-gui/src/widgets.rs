@@ -42,16 +42,16 @@ pub fn vsplit_handle(
     }
     let painter = ui.painter_at(rect);
     if response.hovered() || response.dragged() {
-        painter.rect_filled(rect, 0, theme::RAISED);
+        painter.rect_filled(rect, 0, theme::color(ui, theme::RAISED));
     }
     let grip = egui::Rect::from_center_size(rect.center(), vec2(3.0, 46.0));
     painter.rect_filled(
         grip,
         2,
         if response.dragged() {
-            theme::AMBER
+            theme::color(ui, theme::AMBER)
         } else {
-            theme::MUTED
+            theme::color(ui, theme::MUTED)
         },
     );
     response
@@ -78,21 +78,21 @@ pub fn height_handle(ui: &mut egui::Ui, value: &mut f32, min: f32, max: f32) -> 
     // highlights on hover/drag.
     let painter = ui.painter_at(rect);
     if response.hovered() || response.dragged() {
-        painter.rect_filled(rect, 0, theme::RAISED);
+        painter.rect_filled(rect, 0, theme::color(ui, theme::RAISED));
     }
     let grip = egui::Rect::from_center_size(rect.center(), vec2(46.0, 3.0));
     painter.rect_filled(
         grip,
         2,
         if response.dragged() {
-            theme::AMBER
+            theme::color(ui, theme::AMBER)
         } else {
-            theme::MUTED
+            theme::color(ui, theme::MUTED)
         },
     );
     painter.line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(l::THIN_STROKE, theme::RAISED),
+        Stroke::new(l::THIN_STROKE, theme::color(ui, theme::RAISED)),
     );
     response
 }
@@ -192,12 +192,20 @@ pub fn stereo_meter(ui: &mut egui::Ui, status: Option<&Status>) {
             rect.left() + l::METER_LEFT + channel as f32 * (l::METER_BAR_WIDTH + l::METER_BAR_GAP);
         let bar =
             egui::Rect::from_min_max(pos2(left, top), pos2(left + l::METER_BAR_WIDTH, bottom));
-        painter.rect_filled(bar, l::CARD_RADIUS, theme::RAISED);
+        painter.rect_filled(bar, l::CARD_RADIUS, theme::color(ui, theme::RAISED));
         let level = rms[channel].unwrap_or(c::DB_FLOOR);
         for (low, high, color) in [
-            (c::DB_FLOOR, c::METER_WARN_DB, theme::METER_GREEN),
-            (c::METER_WARN_DB, c::METER_HOT_DB, theme::AMBER),
-            (c::METER_HOT_DB, 0.0, theme::ALERT),
+            (
+                c::DB_FLOOR,
+                c::METER_WARN_DB,
+                theme::color(ui, theme::METER_GREEN),
+            ),
+            (
+                c::METER_WARN_DB,
+                c::METER_HOT_DB,
+                theme::color(ui, theme::AMBER),
+            ),
+            (c::METER_HOT_DB, 0.0, theme::color(ui, theme::ALERT)),
         ] {
             if level > low {
                 painter.rect_filled(
@@ -216,9 +224,9 @@ pub fn stereo_meter(ui: &mut egui::Ui, status: Option<&Status>) {
                 Stroke::new(
                     l::PLAYHEAD_STROKE,
                     if peak >= 0.0 {
-                        theme::ALERT
+                        theme::color(ui, theme::ALERT)
                     } else {
-                        theme::TEXT
+                        theme::color(ui, theme::TEXT)
                     },
                 ),
             );
@@ -228,14 +236,14 @@ pub fn stereo_meter(ui: &mut egui::Ui, status: Option<&Status>) {
             egui::Align2::CENTER_TOP,
             if channel == 0 { "L" } else { "R" },
             egui::FontId::proportional(l::SMALL_FONT),
-            theme::TEXT,
+            theme::color(ui, theme::TEXT),
         );
         painter.text(
             pos2(bar.center().x, bottom + l::SPACE_SMALL),
             egui::Align2::CENTER_TOP,
             db_label(rms[channel]),
             egui::FontId::monospace(l::SMALL_FONT),
-            theme::TEXT,
+            theme::color(ui, theme::TEXT),
         );
     }
     let axis = rect.left()
@@ -249,7 +257,7 @@ pub fn stereo_meter(ui: &mut egui::Ui, status: Option<&Status>) {
             egui::Align2::LEFT_CENTER,
             format!("{tick:.0}"),
             egui::FontId::monospace(l::MICRO_FONT),
-            theme::MUTED,
+            theme::color(ui, theme::MUTED),
         );
     }
 }
@@ -287,7 +295,10 @@ pub fn annotation_lines(
         let x = rect.left() + window.time_to_fraction(annotation.seconds) * rect.width();
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(l::THIN_STROKE, theme::ANNOTATION),
+            Stroke::new(
+                l::THIN_STROKE,
+                theme::color_for(&painter.ctx().style().visuals, theme::ANNOTATION),
+            ),
         );
         // Small tag-like symbol on top of the line.
         let tip = pos2(x, rect.top() + l::ANNOTATION_TAG_H);
@@ -295,8 +306,11 @@ pub fn annotation_lines(
         let right = pos2(x + l::ANNOTATION_TAG_W / 2.0, rect.top());
         painter.add(egui::Shape::convex_polygon(
             vec![left, right, tip],
-            theme::ANNOTATION,
-            Stroke::new(l::THIN_STROKE, theme::PANEL),
+            theme::color_for(&painter.ctx().style().visuals, theme::ANNOTATION),
+            Stroke::new(
+                l::THIN_STROKE,
+                theme::color_for(&painter.ctx().style().visuals, theme::PANEL),
+            ),
         ));
     }
 }
@@ -356,19 +370,19 @@ pub fn waveform_channel_view(
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, l::PLOT_RADIUS, theme::PANEL);
+    painter.rect_filled(rect, l::PLOT_RADIUS, theme::color(ui, theme::PANEL));
     for i in 1..l::GRID_Y_DIVISIONS {
         let y = rect.top() + rect.height() * i as f32 / l::GRID_Y_DIVISIONS as f32;
         painter.line_segment(
             [pos2(rect.left(), y), pos2(rect.right(), y)],
-            Stroke::new(l::THIN_STROKE, theme::RAISED),
+            Stroke::new(l::THIN_STROKE, theme::color(ui, theme::RAISED)),
         );
     }
     for i in 1..l::GRID_X_DIVISIONS {
         let x = rect.left() + rect.width() * i as f32 / l::GRID_X_DIVISIONS as f32;
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(l::THIN_STROKE, theme::RAISED),
+            Stroke::new(l::THIN_STROKE, theme::color(ui, theme::RAISED)),
         );
     }
     if let Some(waveform) = waveform {
@@ -397,7 +411,10 @@ pub fn waveform_channel_view(
         // the quieter normalization preview. Both are source-relative, not live gain.
         // X positions map each bin's center time through the shared zoom
         // window, so waveform content, playhead and annotation lines align.
-        for (gain, color) in [(normalized, theme::NORMALIZED_WAVE), (1.0, theme::AMBER)] {
+        for (gain, color) in [
+            (normalized, theme::color(ui, theme::NORMALIZED_WAVE)),
+            (1.0, theme::color(ui, theme::AMBER)),
+        ] {
             for (i, p) in visible.iter().enumerate() {
                 let center_time = (first + i) as f64 * bin_seconds + bin_seconds / 2.0;
                 if center_time < window.start || center_time > window.end {
@@ -421,7 +438,7 @@ pub fn waveform_channel_view(
             egui::Align2::CENTER_CENTER,
             "Waveform preview",
             egui::FontId::proportional(l::BODY_FONT),
-            theme::MUTED,
+            theme::color(ui, theme::MUTED),
         );
     }
     annotation_lines(&painter, rect, overlays.annotations, window);
@@ -439,7 +456,10 @@ pub fn start_marker(painter: &egui::Painter, rect: egui::Rect, seconds: f64, win
         let x = rect.left() + window.time_to_fraction(seconds) * rect.width();
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(l::THIN_STROKE, theme::PLAY_START),
+            Stroke::new(
+                l::THIN_STROKE,
+                theme::color_for(&painter.ctx().style().visuals, theme::PLAY_START),
+            ),
         );
     }
 }
@@ -449,7 +469,10 @@ pub fn playhead(painter: &egui::Painter, rect: egui::Rect, position: f64, window
         let x = rect.left() + window.time_to_fraction(position) * rect.width();
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(l::PLAYHEAD_STROKE, theme::PURPLE),
+            Stroke::new(
+                l::PLAYHEAD_STROKE,
+                theme::color_for(&painter.ctx().style().visuals, theme::PURPLE),
+            ),
         );
     }
 }
@@ -463,13 +486,13 @@ pub fn spectrum_title(ui: &mut egui::Ui, title: &str, height: f32) -> Response {
     let galley = ui.painter().layout(
         title.into(),
         egui::FontId::proportional(l::SMALL_FONT),
-        theme::MUTED,
+        theme::color(ui, theme::MUTED),
         height,
     );
     let (rect, response) = ui.allocate_exact_size(vec2(galley.size().y, height), Sense::hover());
     let pos = rect.center() - galley.size() / 2.0;
     ui.painter().add(
-        egui::epaint::TextShape::new(pos, galley, theme::MUTED)
+        egui::epaint::TextShape::new(pos, galley, theme::color(ui, theme::MUTED))
             .with_angle_and_anchor(-std::f32::consts::FRAC_PI_2, egui::Align2::CENTER_CENTER),
     );
     response.on_hover_text(title)
@@ -489,7 +512,7 @@ pub fn spectrum_view(
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, l::PLOT_RADIUS, theme::PANEL);
+    painter.rect_filled(rect, l::PLOT_RADIUS, theme::color(ui, theme::PANEL));
     let pad = l::SPACE_SMALL;
     // Plot area spans the full width (dB labels are overlaid at the left edge).
     let inner = egui::Rect::from_min_size(
@@ -520,14 +543,14 @@ pub fn spectrum_view(
         let y = y_of(db);
         painter.line_segment(
             [pos2(inner.left(), y), pos2(inner.right(), y)],
-            Stroke::new(l::THIN_STROKE, theme::RAISED),
+            Stroke::new(l::THIN_STROKE, theme::color(ui, theme::RAISED)),
         );
         painter.text(
             pos2(inner.left() + 2.0, y),
             egui::Align2::LEFT_CENTER,
             format!("{db:.0}"),
             egui::FontId::monospace(l::MICRO_FONT),
-            theme::MUTED,
+            theme::color(ui, theme::MUTED),
         );
         db += step;
     }
@@ -542,7 +565,7 @@ pub fn spectrum_view(
         .iter()
         .map(|&hz| {
             let width = painter
-                .layout_no_wrap(format_hz(hz), font.clone(), theme::MUTED)
+                .layout_no_wrap(format_hz(hz), font.clone(), theme::color(ui, theme::MUTED))
                 .size()
                 .x;
             (hz, x_of(hz), width)
@@ -553,7 +576,7 @@ pub fn spectrum_view(
         let x = x_of(hz);
         painter.line_segment(
             [pos2(x, inner.top()), pos2(x, inner.bottom())],
-            Stroke::new(l::THIN_STROKE, theme::RAISED),
+            Stroke::new(l::THIN_STROKE, theme::color(ui, theme::RAISED)),
         );
         if labels.contains(&index) {
             painter.text(
@@ -561,7 +584,7 @@ pub fn spectrum_view(
                 egui::Align2::CENTER_BOTTOM,
                 format_hz(hz),
                 egui::FontId::monospace(l::MICRO_FONT),
-                theme::MUTED,
+                theme::color(ui, theme::MUTED),
             );
         }
     }
@@ -573,7 +596,10 @@ pub fn spectrum_view(
                 let hz = (i as f32 + 0.5) * spectrum.hz_per_bin;
                 let point = pos2(x_of(hz), y_of(db));
                 if let Some(p) = previous {
-                    painter.line_segment([p, point], Stroke::new(l::THIN_STROKE, theme::AMBER));
+                    painter.line_segment(
+                        [p, point],
+                        Stroke::new(l::THIN_STROKE, theme::color(ui, theme::AMBER)),
+                    );
                 }
                 previous = Some(point);
             }
@@ -590,7 +616,10 @@ pub fn spectrum_view(
                 let db = 20.0 * mag.max(1e-9).log10();
                 let point = pos2(x_of(hz), y_of(db));
                 if let Some(p) = previous {
-                    painter.line_segment([p, point], Stroke::new(l::THIN_STROKE, theme::PURPLE));
+                    painter.line_segment(
+                        [p, point],
+                        Stroke::new(l::THIN_STROKE, theme::color(ui, theme::PURPLE)),
+                    );
                 }
                 previous = Some(point);
             }
@@ -601,7 +630,7 @@ pub fn spectrum_view(
             egui::Align2::CENTER_CENTER,
             "Spectrum",
             egui::FontId::proportional(l::BODY_FONT),
-            theme::MUTED,
+            theme::color(ui, theme::MUTED),
         );
     }
     painter.text(
@@ -609,7 +638,7 @@ pub fn spectrum_view(
         egui::Align2::RIGHT_TOP,
         format!("{:.0} dBFS top", c::SPECTRAL_CEILING_DB),
         egui::FontId::monospace(l::MICRO_FONT),
-        theme::MUTED,
+        theme::color(ui, theme::MUTED),
     );
     if let Some((cutoff_hz, _)) = highpass {
         painter.text(
@@ -617,7 +646,7 @@ pub fn spectrum_view(
             egui::Align2::LEFT_TOP,
             format!("HPF {cutoff_hz:.0} Hz"),
             egui::FontId::monospace(l::MICRO_FONT),
-            theme::PURPLE,
+            theme::color(ui, theme::PURPLE),
         );
     }
     response.on_hover_text(if highpass.is_some() {
@@ -645,15 +674,23 @@ pub fn transport_button(ui: &mut egui::Ui, symbol: TransportSymbol, filled: bool
         response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     }
     let fill = if filled {
-        theme::AMBER
+        theme::color(ui, theme::AMBER)
     } else if response.hovered() {
-        theme::RAISED
+        theme::color(ui, theme::RAISED)
     } else {
-        theme::PANEL
+        theme::color(ui, theme::PANEL)
     };
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, l::CARD_RADIUS, fill);
-    let ink = if filled { Color32::BLACK } else { theme::TEXT };
+    let ink = if filled {
+        if ui.visuals().dark_mode {
+            Color32::BLACK
+        } else {
+            Color32::WHITE
+        }
+    } else {
+        theme::color(ui, theme::TEXT)
+    };
     let c = rect.center();
     let w = rect.width() * 0.30;
     let h = rect.height() * 0.32;
