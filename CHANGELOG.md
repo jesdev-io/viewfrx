@@ -2,6 +2,13 @@
 
 All notable changes to viewfrx. Versions follow SemVer; releases are tagged `v*` and published by CI with per-platform binaries (Linux/Windows/macOS) plus source.
 
+## [0.3.0] - 2026-11-13
+
+- Add System / Light / Dark appearance controls under View → Theme using egui's built-in controls. Default to the system appearance; overrides last only for the current session.
+- Adapt GUI chrome and plot colors to light mode while keeping the spectrogram heatmap's fixed color scale. CLI behavior is unchanged.
+- Place the Annotations heading above its editor and rotate the spectrum title 90° to save horizontal space.
+- Add regression tests for annotation layout, spectrum title rotation, and system-theme changes and overrides.
+
 ## [0.2.0] - 2026-11-12
 
 - Improve unsaved-annotation tracking, including deletions, empty drafts, and exit warnings.
