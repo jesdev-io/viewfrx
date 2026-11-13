@@ -17,6 +17,39 @@ fn test_app(ctx: &egui::Context, directory: &std::path::Path) -> (App, Receiver<
 }
 
 #[test]
+fn annotation_heading_is_above_editor_in_horizontal_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    for width in [240.0, 500.0] {
+        let ctx = egui::Context::default();
+        let (mut app, _rx) = test_app(&ctx, dir.path());
+        app.annotation_text = "[00:00:01:00] layout probe".into();
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| app.annotation_panel(ui, width, 150.0));
+            });
+        });
+        let text_rect = |needle: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape
+                        && text.galley.text().contains(needle)
+                    {
+                        return Some(text.visual_bounding_rect());
+                    }
+                    None
+                })
+                .unwrap_or_else(|| panic!("missing rendered text: {needle}"))
+        };
+        let heading = text_rect("ANNOTATIONS");
+        let editor = text_rect("layout probe");
+        assert!(heading.bottom() < editor.top());
+        assert!((heading.left() - editor.left()).abs() < l::SPACE_SMALL);
+    }
+}
+
+#[test]
 fn closing_with_unsaved_annotations_requires_confirmation() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = egui::Context::default();

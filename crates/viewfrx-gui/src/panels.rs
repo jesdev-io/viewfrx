@@ -845,7 +845,7 @@ impl App {
     }
 
     /// Annotation column/row: the [hh:mm:ss:cc] free-text field.
-    fn annotation_panel(&mut self, ui: &mut egui::Ui, width: f32, height: f32) {
+    pub(super) fn annotation_panel(&mut self, ui: &mut egui::Ui, width: f32, height: f32) {
         egui::Frame::new()
             .fill(theme::PANEL)
             .inner_margin(l::CARD_PADDING)
@@ -853,6 +853,7 @@ impl App {
             .show(ui, |ui| {
                 ui.set_width((width - 2.0 * l::CARD_PADDING as f32).max(50.0));
                 ui.set_min_height((height - 2.0 * l::CARD_PADDING as f32).max(20.0));
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.label(
                     RichText::new("ANNOTATIONS")
                         .size(l::MICRO_FONT)
@@ -894,6 +895,7 @@ impl App {
                     self.annotations.len(),
                     if self.annotations_dirty { "unsaved changes" } else { "saved" }
                 ));
+                });
             });
     }
 
