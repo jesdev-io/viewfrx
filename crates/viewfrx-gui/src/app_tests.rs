@@ -16,6 +16,41 @@ fn test_app(ctx: &egui::Context, directory: &std::path::Path) -> (App, Receiver<
     (App::with_audio(ctx, args, audio), rx)
 }
 
+#[cfg(feature = "spectrogram")]
+#[test]
+fn spectrum_title_is_rotated_and_reserves_its_thickness_only() {
+    for height in [l::PLOT_HEIGHT_MIN, 130.0, 260.0] {
+        let ctx = egui::Context::default();
+        let mut bounds = None;
+        let title = "SPECTRUM · dBFS @ 1234.56 s · HPF ON";
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    bounds = Some(crate::widgets::spectrum_title(ui, title, height).rect);
+                });
+            });
+        });
+        let bounds = bounds.unwrap();
+        let text = output
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::Text(text) = &shape.shape
+                    && text.galley.text() == title
+                {
+                    Some(text)
+                } else {
+                    None
+                }
+            })
+            .expect("rendered spectrum title");
+        assert_eq!(text.angle, -std::f32::consts::FRAC_PI_2);
+        assert_eq!(bounds.width(), text.galley.size().y);
+        assert_eq!(bounds.height(), height);
+        assert!(text.visual_bounding_rect().height() <= height + l::SPACE_SMALL);
+    }
+}
+
 #[test]
 fn annotation_heading_is_above_editor_in_horizontal_parent() {
     let dir = tempfile::tempdir().unwrap();

@@ -915,7 +915,8 @@ impl App {
                 if self.snapshot.status.as_ref().is_some_and(|s| s.highpass) {
                     title.push_str(" · HPF ON");
                 }
-                ui.label(RichText::new(title).size(l::SMALL_FONT).color(theme::MUTED));
+                let plot_height = (height - 2.0 * l::CARD_PADDING as f32).max(l::PLOT_HEIGHT_MIN);
+                widgets::spectrum_title(ui, &title, plot_height);
                 let highpass = self
                     .snapshot
                     .status
@@ -927,7 +928,7 @@ impl App {
                     ui,
                     self.spectrum.as_ref().map(|(_, s)| s),
                     self.spectral.floor_db() as f32,
-                    (height - 2.0 * l::CARD_PADDING as f32 - 18.0).max(40.0),
+                    plot_height,
                     highpass,
                     self.info.as_ref().map_or(48000, |i| i.sample_rate),
                 );

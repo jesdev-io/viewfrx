@@ -457,6 +457,24 @@ pub fn playhead(painter: &egui::Painter, rect: egui::Rect, position: f64, window
 /// Live magnitude spectrum panel. The plot fills the panel from the first
 /// frequency bin (no empty gutters); the 1/3-octave xtick labels are thinned
 /// dynamically so they never overlap (wider panel -> more labels).
+/// Reserve only the rotated text's thickness, wrapping along the panel height.
+#[cfg(feature = "spectrogram")]
+pub fn spectrum_title(ui: &mut egui::Ui, title: &str, height: f32) -> Response {
+    let galley = ui.painter().layout(
+        title.into(),
+        egui::FontId::proportional(l::SMALL_FONT),
+        theme::MUTED,
+        height,
+    );
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().y, height), Sense::hover());
+    let pos = rect.center() - galley.size() / 2.0;
+    ui.painter().add(
+        egui::epaint::TextShape::new(pos, galley, theme::MUTED)
+            .with_angle_and_anchor(-std::f32::consts::FRAC_PI_2, egui::Align2::CENTER_CENTER),
+    );
+    response.on_hover_text(title)
+}
+
 #[cfg(feature = "spectrogram")]
 pub fn spectrum_view(
     ui: &mut egui::Ui,
